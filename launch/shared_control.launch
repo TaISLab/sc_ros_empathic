@@ -1,0 +1,78 @@
+<?xml version="1.0"?>
+<!--
+  shared_control.launch  -  reactive, performance-weighted shared
+  control (human joint-limit safety + robot manipulability factors)
+  on the FR3, end to end.
+
+      roslaunch sc_ros_empathic shared_control.launch
+
+  Placement (nominal vs. stressed, see paper Sec. 5.1) is selected via
+  the path_center/path_radius args, e.g.:
+
+      roslaunch sc_ros_empathic shared_control.launch \
+          path_center:="[0.6, 0.0, 0.35]" path_radius:=0.05
+
+  CHECK BEFORE EVERY SESSION:
+    - human_joint_state_topic / human_link_lengths_topic: PLACEHOLDERS,
+      pending confirmation from the visuo-tactile pipeline owner. If
+      wrong, shared_control_node does NOT fail loudly: it logs one
+      warning and runs without the joint_safety factor. `rostopic hz`
+      both topics before trusting a session.
+    - base_link/ee_link: must match the link names in the FR3 URDF
+      actually loaded on /robot_description (fr3_link0/fr3_link8 here;
+      rename if your description uses different names, e.g. panda_*).
+-->
+<launch>
+
+  <arg name="robot_ip" default="172.16.0.2"/>
+  <arg name="base_link" default="fr3_link0"/>
+  <arg name="ee_link"   default="fr3_link8"/>
+
+  <arg name="human_joint_state_topic"  default="/right_arm/joint_states"/>
+  <arg name="human_link_lengths_topic" default="/right_arm/link_lengths"/>
+
+  <arg name="path_center" default="[0.45, 0.0, 0.45]"/>
+  <arg name="path_radius" default="0.05"/>
+  <arg name="path_normal" default="[0.0, 0.0, 1.0]"/>
+  <arg name="Ka"          default="2.0"/>
+
+  <arg name="rate_hz" default="200.0"/>
+  <arg name="rviz"    default="true"/>
+
+  <!-- ================= robot bring-up ================= -->
+  <!-- Same external Cartesian velocity controller already used
+       elsewhere in this lab's FR3 setup. Placed first so the
+       controller is up before shared_control_node starts publishing
+       velocity commands. -->
+  <include file="$(find taislab_franka_controllers)/launch/cartesian_velocity_external_controller.launch">
+    <arg name="robot_ip"     value="$(arg robot_ip)"/>
+    <arg name="load_gripper" value="false"/>
+  </include>
+
+  <!-- ================= shared control ================= -->
+  <node pkg="sc_ros_empathic" type="shared_control_node.py"
+        name="shared_control_node" output="screen">
+    <param name="base_link" value="$(arg base_link)"/>
+    <param name="ee_link"   value="$(arg ee_link)"/>
+    <param name="base_frame" value="$(arg base_link)"/>
+    <param name="human_joint_state_topic"  value="$(arg human_joint_state_topic)"/>
+    <param name="human_link_lengths_topic" value="$(arg human_link_lengths_topic)"/>
+    <rosparam param="path_center" subst_value="true">$(arg path_center)</rosparam>
+    <param name="path_radius" value="$(arg path_radius)"/>
+    <rosparam param="path_normal" subst_value="true">$(arg path_normal)</rosparam>
+    <param name="Ka" value="$(arg Ka)"/>
+    <param name="rate_hz" value="$(arg rate_hz)"/>
+  </node>
+
+  <!-- ================= visualization ================= -->
+  <node pkg="sc_ros_empathic" type="rviz_visualization_node.py"
+        name="sc_ros_empathic_viz" output="screen">
+    <param name="base_frame" value="$(arg base_link)"/>
+    <rosparam param="path_center" subst_value="true">$(arg path_center)</rosparam>
+    <param name="path_radius" value="$(arg path_radius)"/>
+    <rosparam param="path_normal" subst_value="true">$(arg path_normal)</rosparam>
+  </node>
+
+  <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz"/>
+
+</launch>

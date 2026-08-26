@@ -10,16 +10,21 @@ project(sc_ros_empathic)
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
+  geometry_msgs
+  sensor_msgs
+  std_msgs
+  franka_msgs
+  visualization_msgs
 )
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
 
-## Uncomment this if the package has a setup.py. This macro ensures
-## modules and global scripts declared therein get installed
-## See http://ros.org/doc/api/catkin/html/user_guide/setup_dot_py.html
-# catkin_python_setup()
+## Makes the sc_ros_empathic library under src/ (the ROS-independent
+## shared-control law: shared_control_core, performance, dh_utils,
+## robot_model, path_follower) importable by the scripts in scripts/.
+catkin_python_setup()
 
 ################################################
 ## Declare ROS messages, services and actions ##
@@ -102,10 +107,8 @@ find_package(catkin REQUIRED COMPONENTS
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES sc_ros_empathic
-#  CATKIN_DEPENDS roscpp rospy
-#  DEPENDS system_lib
+  CATKIN_DEPENDS roscpp rospy geometry_msgs sensor_msgs std_msgs
+                 franka_msgs visualization_msgs
 )
 
 ###########
@@ -159,7 +162,8 @@ include_directories(
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
 catkin_install_python(PROGRAMS
-   scripts/sc_empathic_controller.py
+   scripts/shared_control_node.py
+   scripts/rviz_visualization_node.py
    DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
  )
 
