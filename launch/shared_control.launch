@@ -71,12 +71,13 @@
   <arg name="human_arm_points_topic"   default="/right_arm/arm_points"/>
   <arg name="human_points_frame"       default="fr3_link0"/>
 
-  <!-- Robot Jacobian for the manipulability factor. 'topic' (default):
-       the 6xN Jacobian the taislab_controller C++ controller publishes
-       as std_msgs/Float64MultiArray, flattened row-major (PLACEHOLDER
-       name; confirm with the controller owner). 'kdl': compute it
-       locally from q. 'none': disable the factor. -->
-  <arg name="jacobian_source"      default="topic"/>
+  <!-- Robot Jacobian for the manipulability factor. 'analytic'
+       (default): pure-numpy FR3 FK + Jacobian from q (fr3_model.py),
+       self-contained, no PyKDL, per-candidate lookahead. 'kdl': same
+       via PyKDL + /robot_description. 'topic': a 6xN Jacobian published
+       elsewhere as std_msgs/Float64MultiArray row-major (PLACEHOLDER
+       name). 'none': disable the factor. -->
+  <arg name="jacobian_source"      default="analytic"/>
   <arg name="robot_jacobian_topic" default="/taislab_controller/jacobian"/>
 
   <!-- Nominal placement (replicates [1]). Override path_center for the

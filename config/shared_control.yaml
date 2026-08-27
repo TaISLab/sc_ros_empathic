@@ -20,13 +20,15 @@ lpf_alpha: 0.2            # first-order LPF on the emergent command v_s
 dt_lookahead: 0.2         # horizon for the manipulability Jacobian prediction [s]
 
 # --- Robot Jacobian source (manipulability factor) ---------------
-# topic: from the taislab_controller C++ controller (Float64MultiArray,
-#        6xN row-major); kdl: analytic from q via PyKDL; none: disable.
-jacobian_source: topic
-# robot_jacobian_topic: /taislab_controller/jacobian   # PLACEHOLDER
+# analytic: self-contained FR3 FK + Jacobian from q (fr3_model.py),
+#           no PyKDL, per-candidate lookahead.  kdl: same via PyKDL.
+#           topic: J published elsewhere (Float64MultiArray 6xN
+#           row-major), time-propagated lookahead only.  none: disable.
+jacobian_source: analytic
+# robot_jacobian_topic: /taislab_controller/jacobian   # PLACEHOLDER (topic mode)
 # robot_jacobian_rows: 6
 # robot_jacobian_cols: 7
-max_jacobian_age: 0.2     # s; older -> manipulability factor dropped, warned
+max_jacobian_age: 0.2     # s; topic mode: older -> factor dropped, warned
 
 # --- Reactive path follower ----------------------------------------
 Ka: 2.0                   # proportional path-following gain (v_r = Ka (x_d - x))

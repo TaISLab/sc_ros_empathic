@@ -13,7 +13,8 @@ manipulability/singularity avoidance).
   (ported, logic-unchanged, from the offline simulation/verification
   package this law was tuned in): `shared_control_core.py`,
   `performance.py`, `dh_utils.py` (human-arm kinematics),
-  `robot_model.py` (robot Jacobian: published topic or PyKDL), `path_follower.py`
+  `robot_model.py` + `fr3_model.py` (self-contained FR3 FK + geometric
+  Jacobian for the manipulability factor), `path_follower.py`
   (reactive pure-pursuit-style path following), `experiment.py`
   (experimental-condition table, lap counter, joint-margin observable
   -- protocol glue only, no control-law logic), `subject_config.py`
@@ -206,30 +207,32 @@ override via launch args once confirmed (no code change needed).
 The robot Jacobian (for the manipulability factor) comes from
 `~jacobian_source`:
 
-- **`topic`** (default): the 6xN FR3 Jacobian the `taislab_controller`
-  C++ Cartesian-velocity controller already computes in `update()`,
-  published as `std_msgs/Float64MultiArray` (flattened **row-major**)
-  on `~robot_jacobian_topic` (PLACEHOLDER `/taislab_controller/jacobian`
-  -- confirm with the controller owner; set `~robot_jacobian_rows` /
-  `~robot_jacobian_cols` if not 6x7). No PyKDL, and it is exactly the
-  Jacobian the 1 kHz loop uses. If the topic goes stale the
-  manipulability factor drops (fail soft), same as the human-state
-  staleness. **Lookahead caveat:** with only the current-J stream there
-  is no model to evaluate `J(q + qdot_candidate*dt)`, so the predicted
-  Jacobian is the published one propagated forward *in time* (finite
-  difference of the last two messages); `eta_k4` is then the same for
-  `v_h`/`v_r`/blend -- it reduces authority when the trajectory heads
-  toward a singularity rather than ranking the candidates. Per-candidate
-  scoring needs `jacobian_source:=kdl`.
-- **`kdl`**: analytic Jacobian from `q` via PyKDL + `/robot_description`
-  (true per-candidate predicted Jacobian). Requires `python_orocos_kdl`,
-  `kdl_parser_py` and a loaded FR3 URDF; `~base_link` / `~ee_link`
-  (default `fr3_link0` / `fr3_link8`) must match the URDF.
+- **`analytic`** (default): `fr3_model.py` computes the FR3 forward
+  kinematics and the 6x7 geometric Jacobian in pure numpy from the
+  nominal (manufacturer) Denavit-Hartenberg parameters. Self-contained
+  -- only input is `q` from `franka_states`; **no PyKDL**, no
+  `/robot_description`, no dependency on the velocity controller. The
+  lookahead Jacobian `J(q + qdot_candidate*dt)` is evaluated exactly,
+  so `eta_k4` is genuinely **per-candidate** as the paper defines it.
+  Verified against the known FR3 poses and against a finite-difference
+  Jacobian (agreement ~1e-10).
+- **`kdl`**: same result via PyKDL + `/robot_description`. Requires
+  `python_orocos_kdl`, `kdl_parser_py`, a loaded FR3 URDF, and
+  `~base_link` / `~ee_link` (default `fr3_link0` / `fr3_link8`) matching
+  it. Only useful if you want the calibrated URDF kinematics rather
+  than the nominal ones.
+- **`topic`**: a 6xN Jacobian published elsewhere as
+  `std_msgs/Float64MultiArray` (flattened **row-major**) on
+  `~robot_jacobian_topic` (set `~robot_jacobian_rows` /
+  `~robot_jacobian_cols` if not 6x7). Only the *current* J is
+  available, so the lookahead is time-propagated (finite difference of
+  the last two messages), **not** per-candidate; the factor then
+  reduces authority near a singularity rather than ranking candidates.
+  Drops on staleness (fail soft).
 - **`none`**: manipulability factor disabled.
 
-`franka_ros` does **not** publish a Jacobian field (checked against
-`franka_msgs/FrankaState.msg`), which is why one of the two above is
-needed.
+(`franka_ros` does not publish a Jacobian field -- checked against
+`franka_msgs/FrankaState.msg`.)
 
 ## Run
 

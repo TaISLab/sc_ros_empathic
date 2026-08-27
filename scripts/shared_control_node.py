@@ -22,12 +22,12 @@ Reads:
         Confirm the real ones with the visuo-tactile pipeline owner
         and override via the ROS params below -- no code change
         needed once confirmed, just launch-file arguments.
-  * robot Jacobian topic (~jacobian_source=topic, the default): the
-    FR3 Jacobian the taislab_controller C++ controller computes in
-    update(), as std_msgs/Float64MultiArray (the 6xN matrix flattened
-    row-major). Used for the manipulability factor; no PyKDL. Confirm
-    the topic name with the controller owner. ~jacobian_source=kdl
-    computes it locally from q instead.
+The robot Jacobian for the manipulability factor is computed
+analytically from q by fr3_model.py (~jacobian_source=analytic, the
+default) -- self-contained, no PyKDL, independent of the velocity
+controller. ~jacobian_source=kdl (PyKDL) or =topic (a controller that
+publishes its own 6xN Jacobian as std_msgs/Float64MultiArray on
+~robot_jacobian_topic) are alternatives; =none disables the factor.
 
 Experimental condition (~condition, paper Sec. V-B):
   A_standalone      no assistance -- shaped human admittance command only
@@ -255,15 +255,17 @@ class SharedControlNode(object):
         self.proximity_threshold = rospy.get_param('~proximity_threshold', 0.3)
 
         # Robot Jacobian for the manipulability factor.
-        #   topic (default) -- the FR3 Jacobian the taislab_controller
-        #     C++ controller already computes in update(), published as
-        #     std_msgs/Float64MultiArray (6xN row-major). No PyKDL.
-        #   kdl  -- analytic Jacobian from q via PyKDL + /robot_description
-        #           (gives a true per-candidate predicted Jacobian).
-        #   none -- disable the manipulability factor.
+        #   analytic (default) -- self-contained pure-numpy FR3 FK +
+        #     Jacobian from q (fr3_model.py); per-candidate lookahead,
+        #     no PyKDL, no dependency on the velocity controller.
+        #   kdl   -- same, via PyKDL + /robot_description.
+        #   topic -- J supplied on ~robot_jacobian_topic
+        #     (std_msgs/Float64MultiArray, 6xN row-major); lookahead is
+        #     only time-propagated, NOT per-candidate.
+        #   none  -- disable the manipulability factor.
         base_link = rospy.get_param('~base_link', 'fr3_link0')
         ee_link = rospy.get_param('~ee_link', 'fr3_link8')
-        self.jacobian_source = rospy.get_param('~jacobian_source', 'topic')
+        self.jacobian_source = rospy.get_param('~jacobian_source', 'analytic')
         self.robot_jacobian_topic = rospy.get_param(
             '~robot_jacobian_topic', '/taislab_controller/jacobian')
         self.jac_rows = int(rospy.get_param('~robot_jacobian_rows', 6))
@@ -283,12 +285,16 @@ class SharedControlNode(object):
                 rospy.logerr('%s', e)
                 rospy.logerr('shared_control_node: disabling the '
                               'manipulability factor for this run.')
-        else:  # 'topic'
+        elif self.jacobian_source == 'topic':
             robot_model = RobotModel(backend='topic')
             rospy.loginfo('shared_control_node: robot Jacobian from %s '
                           '(%dx%d Float64MultiArray, row-major)',
                           self.robot_jacobian_topic, self.jac_rows,
                           self.jac_cols)
+        else:  # 'analytic'
+            robot_model = RobotModel(backend='analytic')
+            rospy.loginfo('shared_control_node: robot Jacobian computed '
+                          'analytically from q (fr3_model, no PyKDL).')
         self.manipulability_available = robot_model is not None
 
         if ('manipulability' in self.cond_factors
@@ -531,13 +537,14 @@ class SharedControlNode(object):
         return q_ok and l1 is not None
 
     def _jacobian_fresh(self):
-        """Whether the manipulability factor can run this cycle. KDL
-        computes on demand -> always fresh; the topic backend needs a
-        recent message (fail soft, like the human-state staleness)."""
+        """Whether the manipulability factor can run this cycle.
+        analytic / kdl compute from the current q on demand -> fresh as
+        long as we have a robot state; the topic backend needs a recent
+        message (fail soft, like the human-state staleness)."""
         if not self.manipulability_available:
             return False
         if self.jacobian_source != 'topic':
-            return True
+            return self.q_robot is not None
         return (self.robot_jac_stamp is not None
                 and (rospy.Time.now() - self.robot_jac_stamp).to_sec()
                 <= self.max_jacobian_age)
