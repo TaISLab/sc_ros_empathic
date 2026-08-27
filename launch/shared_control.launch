@@ -2,15 +2,35 @@
 <!--
   shared_control.launch  -  reactive, performance-weighted shared
   control (human joint-limit safety + robot manipulability factors)
-  on the FR3, end to end.
+  on the FR3, end to end, wired for the human-subject protocol
+  (paper Sec. V).
+
+  Minimal run (proposed controller, nominal placement):
 
       roslaunch sc_ros_empathic shared_control.launch
 
-  Placement (nominal vs. stressed, see paper Sec. 5.1) is selected via
-  the path_center/path_radius args, e.g.:
+  Select the experimental condition (paper Sec. V-B):
+
+      roslaunch sc_ros_empathic shared_control.launch condition:=B_baseline_m2
+      condition := A_standalone | B_baseline_m2 | C_jointsafety_m3
+                 | D_manip_m3   | E_extended_m4
+      (F, the impedance-control AAN baseline of Zhang et al. [9], is a
+       DIFFERENT controller: roslaunch sc_ros_empathic baseline_aan.launch)
+
+  Select the workspace placement (paper Sec. V-A). Nominal replicates
+  [1]'s mid-workspace circle; stressed pushes it toward the edge of the
+  combined human/robot reach. The stressed centre is PER-PARTICIPANT
+  (computed from the visuo-tactile l1,l2 + shoulder calibration); the
+  value below is only a template:
 
       roslaunch sc_ros_empathic shared_control.launch \
-          path_center:="[0.6, 0.0, 0.35]" path_radius:=0.05
+          placement:=stressed \
+          path_center:="[0.62, 0.05, 0.30]"
+
+  Record a trial to a bag (topics needed for the Sec. V-D metrics):
+
+      roslaunch sc_ros_empathic shared_control.launch \
+          condition:=E_extended_m4 record:=true trial_label:=P03_stressed_E
 
   CHECK BEFORE EVERY SESSION:
     - human_joint_state_topic / human_link_lengths_topic: PLACEHOLDERS,
@@ -21,6 +41,7 @@
     - base_link/ee_link: must match the link names in the FR3 URDF
       actually loaded on /robot_description (fr3_link0/fr3_link8 here;
       rename if your description uses different names, e.g. panda_*).
+    - config/shared_control.yaml holds PLACEHOLDER (pre-hardware) gains.
 -->
 <launch>
 
@@ -28,16 +49,47 @@
   <arg name="base_link" default="fr3_link0"/>
   <arg name="ee_link"   default="fr3_link8"/>
 
+  <!-- Experimental condition (paper Sec. V-B). No default fall-through
+       in the node: an unknown id aborts startup with the valid list. -->
+  <arg name="condition" default="E_extended_m4"/>
+
+  <!-- Placement label, for logging / bag naming only; the geometry is
+       set by path_center/path_radius/path_normal below. -->
+  <arg name="placement" default="nominal"/>
+
+  <!-- Per-volunteer config: config/subjects/<subject>.yaml, holding
+       ONLY the volunteer's id, arm segment lengths and pre-registered
+       joint ranges. Empty -> node runs from plain params. -->
+  <arg name="subject" default=""/>
+  <arg name="subject_file"
+       default="$(eval find('sc_ros_empathic') + '/config/subjects/' + subject + '.yaml' if subject else '')"/>
+
   <arg name="human_joint_state_topic"  default="/right_arm/joint_states"/>
   <arg name="human_link_lengths_topic" default="/right_arm/link_lengths"/>
+  <!-- shoulder/elbow/wrist Cartesian points in the pipeline's fixed
+       frame (PLACEHOLDER name/type; Float64MultiArray [sx..sz,ex..ez,wx..wz]). -->
+  <arg name="human_arm_points_topic"   default="/right_arm/arm_points"/>
+  <arg name="human_points_frame"       default="fr3_link0"/>
 
+  <!-- Nominal placement (replicates [1]). Override path_center for the
+       per-participant stressed placement. -->
   <arg name="path_center" default="[0.45, 0.0, 0.45]"/>
   <arg name="path_radius" default="0.05"/>
   <arg name="path_normal" default="[0.0, 0.0, 1.0]"/>
   <arg name="Ka"          default="2.0"/>
 
-  <arg name="rate_hz" default="200.0"/>
-  <arg name="rviz"    default="true"/>
+  <arg name="rate_hz"    default="200.0"/>
+  <arg name="rviz"       default="true"/>
+  <arg name="show_plane" default="true"/>   <!-- fill the circle with a translucent disc in RViz -->
+  <arg name="rviz_config" default="$(find sc_ros_empathic)/rviz/shared_control.rviz"/>
+
+  <!-- Gains / weights / model params (PLACEHOLDER values, see file). -->
+  <arg name="config" default="$(find sc_ros_empathic)/config/shared_control.yaml"/>
+
+  <!-- Bag recording of the trial. -->
+  <arg name="record"      default="false"/>
+  <arg name="trial_label" default="trial"/>
+  <arg name="bag_dir"     default="$(env HOME)/sc_ros_empathic_bags"/>
 
   <!-- ================= robot bring-up ================= -->
   <!-- Same external Cartesian velocity controller already used
@@ -52,11 +104,18 @@
   <!-- ================= shared control ================= -->
   <node pkg="sc_ros_empathic" type="shared_control_node.py"
         name="shared_control_node" output="screen">
+    <!-- Gains/weights first, so explicit params below win over the file. -->
+    <rosparam command="load" file="$(arg config)"/>
+
+    <param name="condition" value="$(arg condition)"/>
+    <param name="subject_file" value="$(arg subject_file)"/>
     <param name="base_link" value="$(arg base_link)"/>
     <param name="ee_link"   value="$(arg ee_link)"/>
     <param name="base_frame" value="$(arg base_link)"/>
     <param name="human_joint_state_topic"  value="$(arg human_joint_state_topic)"/>
     <param name="human_link_lengths_topic" value="$(arg human_link_lengths_topic)"/>
+    <param name="human_arm_points_topic"   value="$(arg human_arm_points_topic)"/>
+    <param name="human_points_frame"       value="$(arg human_points_frame)"/>
     <rosparam param="path_center" subst_value="true">$(arg path_center)</rosparam>
     <param name="path_radius" value="$(arg path_radius)"/>
     <rosparam param="path_normal" subst_value="true">$(arg path_normal)</rosparam>
@@ -71,8 +130,41 @@
     <rosparam param="path_center" subst_value="true">$(arg path_center)</rosparam>
     <param name="path_radius" value="$(arg path_radius)"/>
     <rosparam param="path_normal" subst_value="true">$(arg path_normal)</rosparam>
+    <param name="show_plane" value="$(arg show_plane)"/>
   </node>
 
-  <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz"/>
+  <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz"
+        args="-d $(arg rviz_config)"/>
+
+  <!-- ================= trial recording ================= -->
+  <!-- OFF by default; record:=true starts it. Everything the offline
+       Sec. V-D metric analysis needs: the raw robot/human inputs and
+       every ~diag/* observable. '-o' -> the bag is named
+       <trial_label>_<YYYY-MM-DD-HH-MM-SS>.bag, so re-runs never
+       overwrite. One bag per session; slice trials offline by the
+       path_progress lap index (lap 0 = training). -->
+  <node if="$(arg record)" pkg="rosbag" type="record" name="trial_recorder"
+        output="screen"
+        args="-o $(arg bag_dir)/$(arg trial_label)
+              /franka_state_controller/franka_states
+              $(arg human_joint_state_topic)
+              $(arg human_link_lengths_topic)
+              $(arg human_arm_points_topic)
+              /robot_vel_ctrl/vel_cmd
+              /shared_control_node/eta
+              /shared_control_node/diag/condition
+              /shared_control_node/diag/factors_layout
+              /shared_control_node/diag/factors_h
+              /shared_control_node/diag/factors_r
+              /shared_control_node/diag/v_h
+              /shared_control_node/diag/v_r
+              /shared_control_node/diag/v_s
+              /shared_control_node/diag/force
+              /shared_control_node/diag/joint_margins
+              /shared_control_node/diag/manipulability
+              /shared_control_node/diag/path_progress
+              /shared_control_node/diag/arm_points
+              /shared_control_node/diag/arm_points_fk
+              /shared_control_node/diag/arm_points_layout"/>
 
 </launch>

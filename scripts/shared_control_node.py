@@ -4,7 +4,8 @@ shared_control_node.py
 -----------------------
 ROS1 node implementing the reactive, performance-weighted shared
 control law (human joint-limit safety + robot manipulability factors)
-on top of the FR3's external Cartesian velocity controller.
+on top of the FR3's external Cartesian velocity controller, wired for
+the human-subject experimental protocol of the paper (Section V).
 
 Reads:
   * /franka_state_controller/franka_states (franka_msgs/FrankaState)
@@ -12,21 +13,41 @@ Reads:
            frame) drives the admittance model that produces v_h;
            O_T_EE (EE pose) and q (joint angles) give the current
            Cartesian position x and robot configuration q_robot.
-  * human arm joint state topic (q_h = q1..q4) and human arm segment
-    lengths (l1, l2), published by the visuo-tactile pipeline.
+  * human arm joint state topic (q_h = q1..q4), segment lengths
+    (l1, l2), and shoulder/elbow/wrist Cartesian points (in the
+    pipeline's fixed frame -- the signal that captures how the
+    shoulder itself moves), all published by the visuo-tactile
+    pipeline.
         !!! TOPIC NAMES/MESSAGE TYPES BELOW ARE PLACEHOLDERS !!!
         Confirm the real ones with the visuo-tactile pipeline owner
         and override via the ROS params below -- no code change
         needed once confirmed, just launch-file arguments.
+
+Experimental condition (~condition, paper Sec. V-B):
+  A_standalone      no assistance -- shaped human admittance command only
+  B_baseline_m2     baseline reactive SC of [1] (smoothness + directness)
+  C_jointsafety_m3  baseline + human joint-limit safety factor  (ablation)
+  D_manip_m3        baseline + robot manipulability factor       (ablation)
+  E_extended_m4     proposed extended SC: all four factors
+  F_impedance_aan   NOT this node -- see scripts/baseline_aan_node.py
+The requested factor set is intersected each cycle with what the
+sensors can support (fresh q_h for joint_safety, a working KDL model
+for manipulability); a downgrade is logged, never silent.
 
 Publishes:
   * <cmd_topic> (geometry_msgs/TwistStamped): the emergent Cartesian
     velocity v_s, consumed by the FR3's external Cartesian velocity
     controller (taislab_franka_controllers /
     cartesian_velocity_external_controller).
-  * ~eta (std_msgs/Float64MultiArray): [eta_h, eta_r, eta_s], logged
-    for offline analysis (e.g. the "compromise-direction"/fork-in-
-    the-path diagnostic described in the paper).
+  * ~eta (std_msgs/Float64MultiArray): [eta_h, eta_r, eta_s].
+  * ~diag/* : per-cycle observables for the offline metric analysis of
+    Sec. V-D (per-factor eta contributions, per-joint margins m_i,
+    FR3 manipulability w(q_r), path progress / lap index / cross-track
+    error, v_h, v_r, v_s, filtered interaction force, and the
+    shoulder/elbow/wrist points -- ~diag/arm_points from the pipeline
+    and ~diag/arm_points_fk from FK on (q_h, l1, l2), poses[0..2] =
+    shoulder, elbow, wrist). All plain std_msgs / geometry_msgs types
+    -- record with `rosbag record`.
 
 IMPORTANT -- rate honesty: this node runs its Python loop at
 ~`~rate_hz` (default 200 Hz), NOT the 1 kHz used in the offline
@@ -47,18 +68,76 @@ do not assume it silently matches the paper's per-cycle timing figures.
 import numpy as np
 import rospy
 from franka_msgs.msg import FrankaState
-from geometry_msgs.msg import TwistStamped
+from geometry_msgs.msg import Pose, PoseArray, TwistStamped, Vector3Stamped
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64, Float64MultiArray, String
 
 from sc_ros_empathic.shared_control_core import SharedControlCore
 from sc_ros_empathic.robot_model import RobotModel
 from sc_ros_empathic.path_follower import CirclePath, ReactivePathFollower
+from sc_ros_empathic.performance import manipulability_index
+from sc_ros_empathic.dh_utils import human_arm_points
+from sc_ros_empathic.experiment import (
+    resolve_condition, LapCounter, joint_margins, CONDITION_F_ID)
+from sc_ros_empathic.subject_config import SubjectConfig, SubjectConfigError
+
+
+# Fixed slot order for the ~diag/factors_* arrays (NaN = factor not
+# active this cycle / for this candidate).
+FACTOR_SLOTS = ("smoothness", "directness", "joint_safety", "manipulability")
+
+
+def _factors_to_array(factors):
+    return [float(factors.get(k, np.nan)) for k in FACTOR_SLOTS]
 
 
 class SharedControlNode(object):
     def __init__(self):
         rospy.init_node('shared_control_node', anonymous=False)
+
+        # ------------------------------------------------------------
+        # Experimental condition (paper Sec. V-B). No silent default:
+        # resolve_condition() raises with the valid id list on a typo.
+        # ------------------------------------------------------------
+        self.condition_id = rospy.get_param('~condition', 'E_extended_m4')
+        if self.condition_id == CONDITION_F_ID:
+            rospy.logfatal(
+                'shared_control_node: condition %s (impedance-control AAN '
+                'baseline of Zhang et al. [9]) is a different controller '
+                'and is not produced by this node. Run '
+                'scripts/baseline_aan_node.py instead.', CONDITION_F_ID)
+            raise rospy.ROSInitException('condition F is not this node')
+        try:
+            cond = resolve_condition(self.condition_id)
+        except ValueError as e:
+            rospy.logfatal('shared_control_node: %s', e)
+            raise rospy.ROSInitException(str(e))
+        self.cond_use_robot = cond['use_robot_command']
+        self.cond_factors = tuple(cond['factors'])
+        rospy.loginfo('shared_control_node: condition %s -- %s',
+                      self.condition_id, cond['description'])
+
+        # ------------------------------------------------------------
+        # Per-volunteer config (intrinsic human parameters ONLY: id,
+        # arm segment lengths, pre-registered joint ranges). Every
+        # experiment parameter is homogeneous across volunteers and
+        # comes from config/shared_control.yaml, not from here.
+        # ~subject_file empty -> run from plain params (back-compat).
+        # ------------------------------------------------------------
+        self.subject = None
+        subject_file = rospy.get_param('~subject_file', '')
+        if subject_file:
+            try:
+                self.subject = SubjectConfig(subject_file)
+            except SubjectConfigError as e:
+                rospy.logfatal('shared_control_node: %s', e)
+                raise rospy.ROSInitException(str(e))
+            rospy.loginfo('shared_control_node: %s', self.subject.summary())
+            if self.subject.dominant_arm and self.subject.dominant_arm != 'right':
+                rospy.logwarn('shared_control_node: subject %s dominant_arm=%r; '
+                              'the visuo-tactile pipeline tracks the RIGHT arm '
+                              'only (paper inclusion criterion).',
+                              self.subject.subject_id, self.subject.dominant_arm)
 
         # ------------------------------------------------------------
         # Topics -- CHECK THESE before every session, same discipline
@@ -80,6 +159,19 @@ class SharedControlNode(object):
         # std_msgs/Float64MultiArray with data = [l1, l2] (m).
         self.human_link_lengths_topic = rospy.get_param(
             '~human_link_lengths_topic', '/right_arm/link_lengths')
+        # PLACEHOLDER -- confirm with the visuo-tactile pipeline owner.
+        # The shoulder/elbow/wrist Cartesian points in the pipeline's
+        # FIXED frame (camera or robot base) -- the signal that captures
+        # how the shoulder itself moves during the trial, which the
+        # shoulder-frame FK cannot. Expected here:
+        # std_msgs/Float64MultiArray, data = [sx,sy,sz, ex,ey,ez, wx,wy,wz].
+        # If the pipeline uses another type, the raw topic is still
+        # recorded by the launch's rosbag regardless; only the
+        # ~diag/arm_points re-publish below needs the subscriber updated.
+        self.human_arm_points_topic = rospy.get_param(
+            '~human_arm_points_topic', '/right_arm/arm_points')
+        self.human_points_frame = rospy.get_param(
+            '~human_points_frame', 'fr3_link0')  # set to the pipeline's frame
         self.eta_topic = rospy.get_param('~eta_topic', '~eta')
 
         self.base_frame = rospy.get_param('~base_frame', 'fr3_link0')
@@ -96,6 +188,7 @@ class SharedControlNode(object):
         Ka = rospy.get_param('~Ka', 2.0)
         self.path = CirclePath(center=center, radius=radius, normal=normal)
         self.follower = ReactivePathFollower(self.path, Ka=Ka)
+        self.lap_counter = LapCounter()
 
         # ------------------------------------------------------------
         # Admittance model for v_h (force -> human-intent velocity).
@@ -114,7 +207,8 @@ class SharedControlNode(object):
         # Shared-control law. Weight/gain defaults below are the ones
         # tuned in offline simulation (see the paper, Sec. 4);
         # re-tune on hardware before trusting them, they are a start
-        # point, not a validated-on-robot result.
+        # point, not a validated-on-robot result. Load config/shared_control.yaml
+        # (via the launch file) to override them per condition.
         # ------------------------------------------------------------
         weights = {
             'smoothness': rospy.get_param('~w_smoothness', 1.0),
@@ -122,6 +216,38 @@ class SharedControlNode(object):
             'joint_safety': rospy.get_param('~w_joint_safety', 16.0),
             'manipulability': rospy.get_param('~w_manipulability', 24.0),
         }
+        self.v_max = rospy.get_param('~v_max', 0.15)
+        self.lpf_alpha = rospy.get_param('~lpf_alpha', 0.2)
+
+        # Pre-registered per-VOLUNTEER physiological joint ranges for the
+        # joint-safety factor. Primary source: config/subjects/SXX.yaml
+        # (joint_limits_rad). Override: ~human_joint_limits, a flat list
+        # [q1min,q1max, q2min,q2max, q3min,q3max, q4min,q4max] (rad).
+        # Neither -> performance.DEFAULT_JOINT_LIMITS.
+        jl_flat = rospy.get_param('~human_joint_limits', None)
+        self.human_joint_limits = None
+        if jl_flat is not None:
+            arr = np.asarray(jl_flat, dtype=float)
+            if arr.size != 8:
+                rospy.logfatal('shared_control_node: ~human_joint_limits must '
+                               'have 8 values ([qi_min,qi_max]*4), got %d',
+                               arr.size)
+                raise rospy.ROSInitException('bad ~human_joint_limits')
+            self.human_joint_limits = arr.reshape(4, 2)
+            rospy.loginfo('shared_control_node: joint ranges from '
+                          '~human_joint_limits (overriding subject file)')
+        elif self.subject is not None and self.subject.has_joint_limits:
+            self.human_joint_limits = self.subject.joint_limits
+            rospy.loginfo('shared_control_node: joint ranges from subject %s',
+                          self.subject.subject_id)
+        else:
+            rospy.loginfo('shared_control_node: joint ranges = study defaults '
+                          '(performance.DEFAULT_JOINT_LIMITS)')
+
+        # tau: the joint-margin threshold IS homogeneous across
+        # volunteers -- it stays in config/shared_control.yaml.
+        self.proximity_threshold = rospy.get_param('~proximity_threshold', 0.3)
+
         base_link = rospy.get_param('~base_link', 'fr3_link0')
         ee_link = rospy.get_param('~ee_link', 'fr3_link8')
         try:
@@ -133,23 +259,49 @@ class SharedControlNode(object):
             robot_model = None
         self.manipulability_available = robot_model is not None
 
+        if ('manipulability' in self.cond_factors
+                and not self.manipulability_available):
+            rospy.logerr('shared_control_node: condition %s REQUIRES the '
+                          'manipulability factor but the KDL robot model '
+                          'failed to initialize -- this run will not be a '
+                          'valid %s trial. Fix PyKDL/URDF before recording.',
+                          self.condition_id, self.condition_id)
+
         self.core = SharedControlCore(
             dt_lookahead=rospy.get_param('~dt_lookahead', 0.2),
-            v_max=rospy.get_param('~v_max', 0.15),
-            lpf_alpha=rospy.get_param('~lpf_alpha', 0.2),
+            v_max=self.v_max,
+            lpf_alpha=self.lpf_alpha,
             weights=weights,
             C1=rospy.get_param('~C1', 1.0),
             C2=rospy.get_param('~C2', 1.0),
             Cs=rospy.get_param('~Cs', 12.0),
             Cm=rospy.get_param('~Cm', 24.0),
             robot_model=robot_model,
+            joint_limits=self.human_joint_limits,
+            proximity_threshold=self.proximity_threshold,
         )
+
+        # Standalone (condition A) command shaping: same LPF + speed
+        # saturation the core applies to v_s, so A and the assisted
+        # conditions differ only in whether the robot assists, not in
+        # output smoothing / speed cap.
+        self._standalone_filt = np.zeros(3)
 
         # ------------------------------------------------------------
         # Human-arm state (fail-safe: stale/missing -> drop
         # joint_safety from active_factors rather than run with a
         # frozen/garbage q_h, mirroring the Gamma-timeout fail-safe
         # pattern already used elsewhere in this lab's controllers).
+        #
+        # q_h is inherently dynamic -> topic only. l1/l2: the paper's
+        # visuo-tactile pipeline publishes time-varying estimates on
+        # ~human_link_lengths_topic; the sibling package
+        # (sc_effort_experiment) instead uses hand-measured per-subject
+        # l1/l2. Static fallback here, in priority order:
+        #   1. config/subjects/SXX.yaml (anthropometry.l1_m / l2_m)
+        #   2. ~human_link_lengths = [l1, l2]  (explicit override)
+        # The live topic is used while fresh; the static value fills in
+        # otherwise; joint_safety only drops if neither is available.
         # ------------------------------------------------------------
         self.q_h = None
         self.l1 = None
@@ -157,6 +309,33 @@ class SharedControlNode(object):
         self.q_h_stamp = rospy.Time(0)
         self.link_lengths_stamp = rospy.Time(0)
         self.max_human_state_age = rospy.get_param('~max_human_state_age', 0.3)
+
+        # Shoulder/elbow/wrist Cartesian points from the pipeline
+        # (fixed frame). Recorded as-is; re-published normalised below.
+        self.arm_points_raw = None            # (9,) [sx..sz, ex..ez, wx..wz]
+        self.arm_points_stamp = rospy.Time(0)
+
+        self.l1_static = None
+        self.l2_static = None
+        ll_static = rospy.get_param('~human_link_lengths', None)
+        if ll_static is not None:
+            arr = np.asarray(ll_static, dtype=float)
+            if arr.size != 2 or np.any(arr <= 0.0):
+                rospy.logfatal('shared_control_node: ~human_link_lengths must '
+                               'be [l1, l2] in metres, both > 0; got %s',
+                               ll_static)
+                raise rospy.ROSInitException('bad ~human_link_lengths')
+            self.l1_static, self.l2_static = float(arr[0]), float(arr[1])
+            rospy.loginfo('shared_control_node: static link lengths from '
+                          '~human_link_lengths l1=%.3f l2=%.3f m',
+                          self.l1_static, self.l2_static)
+        elif self.subject is not None:
+            self.l1_static, self.l2_static = self.subject.link_lengths()
+            rospy.loginfo('shared_control_node: static link lengths from '
+                          'subject %s l1=%.3f l2=%.3f m (fallback when %s is '
+                          'silent/stale)', self.subject.subject_id,
+                          self.l1_static, self.l2_static,
+                          self.human_link_lengths_topic)
 
         # ------------------------------------------------------------
         # Robot state (from franka_states)
@@ -172,12 +351,53 @@ class SharedControlNode(object):
         self.cmd_pub = rospy.Publisher(self.cmd_topic, TwistStamped, queue_size=1)
         self.eta_pub = rospy.Publisher(self.eta_topic, Float64MultiArray, queue_size=1)
 
+        # Diagnostics for offline metric analysis (Sec. V-D). Latched
+        # where the value is constant for the whole run.
+        self.diag = {
+            'condition': rospy.Publisher('~diag/condition', String,
+                                          queue_size=1, latch=True),
+            'factors_layout': rospy.Publisher('~diag/factors_layout', String,
+                                               queue_size=1, latch=True),
+            'factors_h': rospy.Publisher('~diag/factors_h', Float64MultiArray,
+                                          queue_size=1),
+            'factors_r': rospy.Publisher('~diag/factors_r', Float64MultiArray,
+                                          queue_size=1),
+            'v_h': rospy.Publisher('~diag/v_h', Vector3Stamped, queue_size=1),
+            'v_r': rospy.Publisher('~diag/v_r', Vector3Stamped, queue_size=1),
+            'v_s': rospy.Publisher('~diag/v_s', Vector3Stamped, queue_size=1),
+            'force': rospy.Publisher('~diag/force', Vector3Stamped, queue_size=1),
+            'joint_margins': rospy.Publisher('~diag/joint_margins',
+                                              Float64MultiArray, queue_size=1),
+            'manipulability': rospy.Publisher('~diag/manipulability', Float64,
+                                               queue_size=1),
+            'path_progress': rospy.Publisher('~diag/path_progress',
+                                              Float64MultiArray, queue_size=1),
+            # shoulder/elbow/wrist points, poses[0..2] in that order:
+            #  - arm_points     : from the pipeline, pipeline fixed frame
+            #  - arm_points_fk  : FK from (q_h, l1, l2), 'human_shoulder'
+            #                     frame (shoulder at origin) -- consistency
+            #                     check, does NOT show shoulder drift
+            'arm_points': rospy.Publisher('~diag/arm_points', PoseArray,
+                                           queue_size=1),
+            'arm_points_fk': rospy.Publisher('~diag/arm_points_fk', PoseArray,
+                                              queue_size=1),
+            'arm_points_layout': rospy.Publisher('~diag/arm_points_layout',
+                                                  String, queue_size=1,
+                                                  latch=True),
+        }
+        self.diag['condition'].publish(String(data=self.condition_id))
+        self.diag['factors_layout'].publish(
+            String(data=','.join(FACTOR_SLOTS)))
+        self.diag['arm_points_layout'].publish(String(data='shoulder,elbow,wrist'))
+
         rospy.Subscriber(self.franka_states_topic, FrankaState,
                           self._franka_state_cb, queue_size=1)
         rospy.Subscriber(self.human_joint_state_topic, JointState,
                           self._human_joint_state_cb, queue_size=1)
         rospy.Subscriber(self.human_link_lengths_topic, Float64MultiArray,
                           self._human_link_lengths_cb, queue_size=1)
+        rospy.Subscriber(self.human_arm_points_topic, Float64MultiArray,
+                          self._human_arm_points_cb, queue_size=1)
 
         self.rate_hz = rospy.get_param('~rate_hz', 200.0)
         self.dt = 1.0 / self.rate_hz
@@ -221,6 +441,16 @@ class SharedControlNode(object):
         self.l1, self.l2 = float(msg.data[0]), float(msg.data[1])
         self.link_lengths_stamp = rospy.Time.now()
 
+    def _human_arm_points_cb(self, msg):
+        if len(msg.data) < 9:
+            rospy.logwarn_throttle(
+                5.0, 'shared_control_node: %s published <9 values '
+                '(got %d); expected [sx,sy,sz, ex,ey,ez, wx,wy,wz]. '
+                'Ignoring.', self.human_arm_points_topic, len(msg.data))
+            return
+        self.arm_points_raw = np.array(msg.data[0:9], dtype=float)
+        self.arm_points_stamp = rospy.Time.now()
+
     def _update_force(self, f_ext_raw):
         f_norm = np.linalg.norm(f_ext_raw)
         f_deadzone = (np.zeros(3) if f_norm < self.deadzone_N else
@@ -228,13 +458,99 @@ class SharedControlNode(object):
         self.f_filtered = (self.alpha_f * f_deadzone
                             + (1.0 - self.alpha_f) * self.f_filtered)
 
+    def _link_lengths_topic_fresh(self):
+        return (self.l1 is not None and self.l2 is not None
+                and (rospy.Time.now() - self.link_lengths_stamp).to_sec()
+                <= self.max_human_state_age)
+
+    def _current_link_lengths(self):
+        """(l1, l2) to use this cycle: the topic estimate while fresh,
+        else the static ~human_link_lengths fallback, else (None, None)."""
+        if self._link_lengths_topic_fresh():
+            return self.l1, self.l2
+        if self.l1_static is not None:
+            return self.l1_static, self.l2_static
+        return None, None
+
     def _human_state_fresh(self):
         now = rospy.Time.now()
         q_ok = (self.q_h is not None
                 and (now - self.q_h_stamp).to_sec() <= self.max_human_state_age)
-        len_ok = (self.l1 is not None and self.l2 is not None
-                  and (now - self.link_lengths_stamp).to_sec() <= self.max_human_state_age)
-        return q_ok and len_ok
+        l1, l2 = self._current_link_lengths()
+        return q_ok and l1 is not None
+
+    def _shape_standalone(self, v_h):
+        """Condition A output: LPF + speed cap on the human command,
+        identical to the shaping the core applies to v_s."""
+        self._standalone_filt = (self.lpf_alpha * v_h
+                                  + (1.0 - self.lpf_alpha) * self._standalone_filt)
+        speed = np.linalg.norm(self._standalone_filt)
+        if speed <= self.v_max:
+            return self._standalone_filt
+        return self._standalone_filt * self.v_max / max(speed, 1e-9)
+
+    # ------------------------------------------------------------
+    # Diagnostics
+    # ------------------------------------------------------------
+    @staticmethod
+    def _pose_array(points, frame_id, stamp):
+        pa = PoseArray()
+        pa.header.stamp = stamp
+        pa.header.frame_id = frame_id
+        for p in points:
+            pose = Pose()
+            pose.position.x, pose.position.y, pose.position.z = (
+                float(p[0]), float(p[1]), float(p[2]))
+            pose.orientation.w = 1.0
+            pa.poses.append(pose)
+        return pa
+
+    def _publish_diag(self, stamp, v_h, v_r, v_s, factors_h, factors_r,
+                       s_near, lap, cross_track, human_fresh, l1_cur, l2_cur):
+        def vec3(pub_key, v):
+            m = Vector3Stamped()
+            m.header.stamp = stamp
+            m.header.frame_id = self.base_frame
+            m.vector.x, m.vector.y, m.vector.z = (float(v[0]), float(v[1]),
+                                                   float(v[2]))
+            self.diag[pub_key].publish(m)
+
+        vec3('v_h', v_h)
+        vec3('v_r', v_r)
+        vec3('v_s', v_s)
+        vec3('force', self.f_filtered)
+
+        self.diag['factors_h'].publish(
+            Float64MultiArray(data=_factors_to_array(factors_h)))
+        self.diag['factors_r'].publish(
+            Float64MultiArray(data=_factors_to_array(factors_r)))
+
+        self.diag['path_progress'].publish(Float64MultiArray(
+            data=[float(s_near), float(lap),
+                  float(lap) + float(s_near), float(cross_track)]))
+
+        if human_fresh and self.q_h is not None:
+            margins, min_margin = joint_margins(self.q_h,
+                                                self.human_joint_limits)
+            self.diag['joint_margins'].publish(Float64MultiArray(
+                data=list(map(float, margins)) + [float(min_margin)]))
+
+        if self.manipulability_available and self.J_robot is not None:
+            self.diag['manipulability'].publish(
+                Float64(data=float(manipulability_index(self.J_robot))))
+
+        # Shoulder/elbow/wrist Cartesian points.
+        if (self.arm_points_raw is not None
+                and (stamp - self.arm_points_stamp).to_sec()
+                <= self.max_human_state_age):
+            pts = self.arm_points_raw.reshape(3, 3)
+            self.diag['arm_points'].publish(
+                self._pose_array(pts, self.human_points_frame, stamp))
+        if (self.q_h is not None and l1_cur is not None
+                and (stamp - self.q_h_stamp).to_sec() <= self.max_human_state_age):
+            sh, el, wr = human_arm_points(self.q_h, l1_cur, l2_cur)
+            self.diag['arm_points_fk'].publish(
+                self._pose_array((sh, el, wr), 'human_shoulder', stamp))
 
     # ------------------------------------------------------------
     # Control loop
@@ -252,47 +568,73 @@ class SharedControlNode(object):
             accel = (self.f_filtered - self.B_h * self.v_h) / self.M_h
             self.v_h = self.v_h + accel * self.dt
 
-            # 2. Robot path-following velocity + path tangent.
-            v_r, tangent = self.follower.robot_command(self.x)
+            # 2. Path progress (observable) + robot command.
+            s_near, cross_track = self.follower.progress(self.x)
+            lap = self.lap_counter.update(s_near)
+            if self.cond_use_robot:
+                v_r, tangent = self.follower.robot_command(self.x)
+            else:
+                v_r = np.zeros(3)
+                tangent = self.path.tangent(s_near)
 
-            # 3. Active factors: drop joint_safety if the human-arm
-            #    state is missing/stale, drop manipulability if KDL
-            #    never initialized. Fail SOFT (degrade to fewer
-            #    factors), never fail SILENT-WRONG (use garbage q_h).
-            active_factors = ['smoothness', 'directness']
+            # 3. Active factors: start from the CONDITION's factor set,
+            #    then drop joint_safety if the human-arm state is
+            #    missing/stale, drop manipulability if KDL never
+            #    initialized. Fail SOFT (fewer factors), never fail
+            #    SILENT-WRONG (use garbage q_h / a stale Jacobian).
             human_fresh = self._human_state_fresh()
-            if human_fresh:
-                active_factors.append('joint_safety')
-            elif not warned_stale_human_state:
+            active_factors = []
+            for f in self.cond_factors:
+                if f == 'joint_safety' and not human_fresh:
+                    continue
+                if f == 'manipulability' and not self.manipulability_available:
+                    continue
+                active_factors.append(f)
+
+            need_human = 'joint_safety' in self.cond_factors
+            if need_human and not human_fresh and not warned_stale_human_state:
                 rospy.logwarn('shared_control_node: human arm state '
-                               'stale/missing (topics %s, %s) -- running '
-                               'WITHOUT joint_safety until it recovers.',
-                               self.human_joint_state_topic,
-                               self.human_link_lengths_topic)
+                               'stale/missing (topics %s, %s) -- condition '
+                               '%s running WITHOUT joint_safety until it '
+                               'recovers.', self.human_joint_state_topic,
+                               self.human_link_lengths_topic, self.condition_id)
                 warned_stale_human_state = True
-            if human_fresh and warned_stale_human_state:
+            if need_human and human_fresh and warned_stale_human_state:
                 rospy.loginfo('shared_control_node: human arm state '
                                'recovered, joint_safety re-enabled.')
                 warned_stale_human_state = False
+
+            # 4. Emergent command.
+            self.J_robot = None
             if self.manipulability_available:
-                active_factors.append('manipulability')
+                self.J_robot = self.core.robot_model.jacobian(self.q_robot)
 
-            J_robot = None
-            if self.manipulability_available:
-                J_robot = self.core.robot_model.jacobian(self.q_robot)
+            l1_cur, l2_cur = self._current_link_lengths()
+            if self.cond_use_robot:
+                v_s, info = self.core.step(
+                    self.v_h, v_r, tangent,
+                    q_human=self.q_h if human_fresh else None,
+                    l1=l1_cur if human_fresh else None,
+                    l2=l2_cur if human_fresh else None,
+                    q_robot=self.q_robot,
+                    J_robot=self.J_robot,
+                    active_factors=tuple(active_factors))
+                eta_h, eta_r, eta_s = (info['eta_h'], info['eta_r'],
+                                       info['eta_s'])
+                factors_h, factors_r = info['factors_h'], info['factors_r']
+            else:
+                # Condition A: no assistance. Shape v_h only; the core
+                # blend / eta_s pass are bypassed by design.
+                v_s = self._shape_standalone(self.v_h)
+                eta_h, eta_r, eta_s = 1.0, 0.0, 1.0
+                factors_h, factors_r = {}, {}
+                self.core.v_prev = v_s  # keep smoothness reference coherent
 
-            v_s, info = self.core.step(
-                self.v_h, v_r, tangent,
-                q_human=self.q_h if human_fresh else None,
-                l1=self.l1 if human_fresh else None,
-                l2=self.l2 if human_fresh else None,
-                q_robot=self.q_robot,
-                J_robot=J_robot,
-                active_factors=tuple(active_factors))
+            # 5. Publish command + eta + diagnostics.
+            stamp = rospy.Time.now()
 
-            # 4. Publish.
             twist_msg = TwistStamped()
-            twist_msg.header.stamp = rospy.Time.now()
+            twist_msg.header.stamp = stamp
             twist_msg.header.frame_id = self.base_frame
             twist_msg.twist.linear.x = float(v_s[0])
             twist_msg.twist.linear.y = float(v_s[1])
@@ -300,8 +642,12 @@ class SharedControlNode(object):
             self.cmd_pub.publish(twist_msg)
 
             eta_msg = Float64MultiArray()
-            eta_msg.data = [info['eta_h'], info['eta_r'], info['eta_s']]
+            eta_msg.data = [eta_h, eta_r, eta_s]
             self.eta_pub.publish(eta_msg)
+
+            self._publish_diag(stamp, self.v_h, v_r, v_s, factors_h,
+                                factors_r, s_near, lap, cross_track,
+                                human_fresh, l1_cur, l2_cur)
 
             rate.sleep()
 

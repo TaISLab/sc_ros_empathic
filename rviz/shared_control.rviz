@@ -1,0 +1,66 @@
+# RViz config for sc_ros_empathic: shows the circle to trace (outline +
+# translucent disc) and the current end-effector, plus the FR3 TF tree.
+# roslaunch loads it via  rviz -d $(find sc_ros_empathic)/rviz/shared_control.rviz
+Panels:
+  - Class: rviz/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /MarkerArray1
+      Splitter Ratio: 0.5
+  - Class: rviz/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 0.1
+      Plane Cell Count: 20
+      Color: 160; 160; 164
+      Reference Frame: <Fixed Frame>
+    - Class: rviz/TF
+      Name: TF
+      Enabled: true
+      Marker Scale: 0.3
+      Show Arrows: false
+      Show Axes: true
+      Show Names: false
+    - Class: rviz/MarkerArray
+      Name: MarkerArray
+      Enabled: true
+      Marker Topic: /sc_ros_empathic/viz
+      Queue Size: 10
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: fr3_link0
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz/Interact
+    - Class: rviz/MoveCamera
+    - Class: rviz/Select
+    - Class: rviz/FocusCamera
+    - Class: rviz/Measure
+  Value: true
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Name: Current View
+      Distance: 1.4
+      Focal Point:
+        X: 0.45
+        Y: 0.0
+        Z: 0.4
+      Pitch: 0.5
+      Yaw: 0.9
+      Near Clip Distance: 0.01
+  Value: true
+Window Geometry:
+  Displays:
+    collapsed: false
+  Height: 800
+  Width: 1200
+  Hide Left Dock: false
+  Hide Right Dock: false

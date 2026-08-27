@@ -113,3 +113,14 @@ class ReactivePathFollower:
         x_d, tangent, _ = self.next_goal(x)
         v_r = self.Ka * (x_d - x)
         return v_r, tangent
+
+    def progress(self, x):
+        """Observable-only: the participant's current progress along the
+        path, for lap counting and cross-track-error logging (NOT used
+        by the control law). Returns (s_near, cross_track_dist) where
+        s_near = argmin_s dist(x, P(s)) in [0, 1) and cross_track_dist
+        is that minimum distance in metres.
+        """
+        s_near = self.path.nearest_s(x, self.n_samples)
+        cross_track = self._dist_to_path(x, s_near)
+        return s_near, cross_track

@@ -163,6 +163,7 @@ include_directories(
 ## in contrast to setup.py, you can choose the destination
 catkin_install_python(PROGRAMS
    scripts/shared_control_node.py
+   scripts/baseline_aan_node.py
    scripts/rviz_visualization_node.py
    DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
  )
@@ -188,7 +189,7 @@ catkin_install_python(PROGRAMS
 #   PATTERN ".svn" EXCLUDE
 # )
 
-install(DIRECTORY launch
+install(DIRECTORY launch config rviz
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 

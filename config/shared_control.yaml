@@ -1,0 +1,71 @@
+# shared_control.yaml
+# -------------------
+# Gains / weights / model parameters for shared_control_node.py.
+#
+# Loaded into the node's PRIVATE namespace by shared_control.launch
+# (<rosparam file="..." />), so every key here is read by the node as
+# ~<key>. Anything set as a <param>/<arg> in the launch file overrides
+# the value here.
+#
+# !!! PLACEHOLDER VALUES !!!  These are the pre-hardware-tuning numbers
+# carried over from the offline simulation draft (paper Sec. IV-F/IV-G,
+# which itself flags them as superseded). Re-tune on the FR3 with
+# sim/tune_gains-style sweeps before recording human-subject data; do
+# not treat any number below as validated on hardware.
+
+# --- Loop / output shaping -------------------------------------------
+rate_hz: 200.0            # Python loop rate (see node docstring: NOT 1 kHz)
+v_max: 0.15               # EE Cartesian speed cap [m/s]
+lpf_alpha: 0.2            # first-order LPF on the emergent command v_s
+dt_lookahead: 0.2         # horizon for the manipulability Jacobian prediction [s]
+
+# --- Reactive path follower ----------------------------------------
+Ka: 2.0                   # proportional path-following gain (v_r = Ka (x_d - x))
+
+# --- Admittance model (force -> human-intent velocity v_h) ---------
+admittance_mass:    [1.0, 1.0, 1.0]     # M_h, per Cartesian axis
+admittance_damping: [10.0, 10.0, 10.0]  # B_h, per Cartesian axis
+force_deadzone_N: 1.0
+force_lpf_alpha: 0.1
+
+# --- Performance-factor exponential gains -------------------------
+C1: 1.0                   # smoothness   eta_k1 = exp(-C1 |angle(v_k, v_prev)|)
+C2: 1.0                   # directness   eta_k2 = exp(-C2 |angle(v_k, tangent)|)
+Cs: 12.0                  # human joint-limit safety factor
+Cm: 24.0                  # robot manipulability factor
+
+# --- Performance-factor blend weights (w_i in eta_k = sum w_i eta_ki / sum w_i)
+# For a clean B-vs-E comparison keep w_smoothness / w_directness identical
+# across conditions; the node already only *activates* the factor subset
+# its ~condition asks for, so these weights are simply ignored when the
+# corresponding factor is inactive (conditions A/B/C/D).
+w_smoothness: 1.0
+w_directness: 1.0
+w_joint_safety: 16.0
+w_manipulability: 24.0
+
+# --- Human joint-limit safety: pre-registered threshold ----------
+# proximity_threshold = tau (paper Fig. 2b): the normalized margin
+# below which the static proximity term starts to penalise. This IS
+# homogeneous across volunteers -> it stays here.
+proximity_threshold: 0.3
+# The per-VOLUNTEER physiological joint ranges do NOT belong here:
+# put them in config/subjects/<subject>.yaml (joint_limits_rad) and
+# launch with subject:=SXX. ~human_joint_limits below is only an
+# ad-hoc override (flat [q1min,q1max, ... ,q4min,q4max] rad); unset,
+# and with no subject file, the study defaults
+# (performance.DEFAULT_JOINT_LIMITS) are used.
+# human_joint_limits: [-1.05, 3.14,  0.0, 3.14,  -1.57, 1.57,  0.0, 2.53]
+
+# --- Human-arm segment lengths ----------------------------------
+# The visuo-tactile pipeline is expected to publish time-varying
+# [l1, l2] on ~human_link_lengths_topic. The static fallback (used
+# whenever that topic is silent/stale, so joint_safety keeps running)
+# comes from config/subjects/<subject>.yaml (anthropometry.l1_m /
+# l2_m). ~human_link_lengths below is only an ad-hoc override.
+# human_link_lengths: [0.30, 0.27]
+
+# --- Human-arm state staleness fail-safe -------------------------
+# 0.2 s in the sibling package; 0.3 here. q_h always needs the live
+# topic; l1/l2 fall back to human_link_lengths above when set.
+max_human_state_age: 0.3   # s; stale q_h (or stale l1/l2 with no fallback) -> joint_safety dropped, warned

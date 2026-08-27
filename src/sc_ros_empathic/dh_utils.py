@@ -63,6 +63,26 @@ def human_arm_wrist_position(q, l1, l2):
     return human_arm_fk(q, l1, l2)[:3, 3]
 
 
+def human_arm_points(q, l1, l2):
+    """(shoulder, elbow, wrist) Cartesian positions, each (3,), IN THE
+    SHOULDER FRAME {0} -- so the shoulder is the origin (0, 0, 0) by
+    construction. For logging and for cross-checking the visuo-tactile
+    pipeline's own q against its own Cartesian estimates.
+
+    This does NOT capture how the shoulder itself moves in the room:
+    for that, record the pipeline's shoulder/elbow/wrist points in its
+    fixed (camera or robot-base) frame, which is a separate signal.
+    """
+    q = np.asarray(q, dtype=float)
+    T = np.eye(4)
+    elbow = None
+    for i, (a, alpha, d, theta) in enumerate(human_arm_dh_params(q, l1, l2)):
+        T = T @ dh_transform(a, alpha, d, theta)
+        if i == 2:                       # after the 3rd joint -> elbow
+            elbow = T[:3, 3].copy()
+    return np.zeros(3), elbow, T[:3, 3].copy()
+
+
 def human_arm_jacobian(q, l1, l2, eps=1e-6):
     """Numerical (finite-difference) 3x4 positional Jacobian of the wrist
     position w.r.t. the 4 human joint angles. A numerical Jacobian is used

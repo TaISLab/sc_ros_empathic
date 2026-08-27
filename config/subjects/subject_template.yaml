@@ -1,0 +1,45 @@
+# Per-volunteer configuration. ONE file per volunteer:
+#   config/subjects/S01.yaml, config/subjects/S02.yaml, ...
+# Launch with:
+#   roslaunch sc_ros_empathic shared_control.launch subject:=S01 condition:=E_extended_m4
+#
+# This file holds ONLY intrinsic human parameters (id, arm segment
+# lengths, pre-registered joint ranges). Everything about the EXPERIMENT
+# -- controller gains, factor weights, the joint-margin threshold tau,
+# path geometry, loop rate -- is the SAME for every volunteer and lives
+# in config/shared_control.yaml, not here.
+#
+# A missing required value (subject.id, anthropometry.l1_m, l2_m) makes
+# the node abort at startup with a clear message -- never a silent default.
+
+subject:
+  id: S00                 # REQUIRED. Match the file name (S00 -> S00.yaml).
+  date: ''                # ISO date of the session (bookkeeping only).
+  dominant_arm: right     # Inclusion criterion is right-handed; a value
+                          # other than 'right' only logs a warning.
+  # Demographics for the paper's participant table. Bookkeeping only --
+  # nothing in the control law reads them; blank or 0 = not filled yet.
+  sex: ''                 # 'f' | 'm' | 'other'
+  age_years: 0
+  height_m: 0.0
+  mass_kg: 0.0
+  notes: ''
+
+anthropometry:
+  # Metres. From the visuo-tactile calibration (preferred) or a
+  # goniometer / tape measure:
+  #   l1 = acromion -> lateral epicondyle        (upper arm)
+  #   l2 = lateral epicondyle -> ulnar styloid   (forearm)
+  l1_m: 0.0               # REQUIRED, > 0
+  l2_m: 0.0               # REQUIRED, > 0
+  source: ''              # 'visuo-tactile' | 'goniometer' | 'tape'
+
+# Pre-registered physiological joint ranges [min, max] in RADIANS, from
+# per-volunteer goniometry. OPTIONAL: omit the whole block to use the
+# study-default ranges (performance.DEFAULT_JOINT_LIMITS). If present,
+# ALL FOUR joints are required.
+joint_limits_rad:
+  q1: [-1.05, 3.14]       # shoulder flexion/extension
+  q2: [0.0, 3.14]         # shoulder abduction/adduction
+  q3: [-1.57, 1.57]       # shoulder internal/external rotation
+  q4: [0.0, 2.53]         # elbow flexion/extension

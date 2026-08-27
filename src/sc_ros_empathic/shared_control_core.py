@@ -22,7 +22,8 @@ from .robot_model import RobotModel  # noqa: F401  (re-exported for callers)
 class SharedControlCore(object):
     def __init__(self, dt_lookahead=0.05, v_max=0.15, lpf_alpha=0.2,
                  weights=None, C1=1.0, C2=1.0, Cs=1.0, Cm=1.0,
-                 robot_model=None):
+                 robot_model=None, joint_limits=None,
+                 proximity_threshold=0.3):
         self.dt_lookahead = dt_lookahead
         self.v_max = v_max
         self.alpha_lpf = lpf_alpha
@@ -30,6 +31,13 @@ class SharedControlCore(object):
                                     "joint_safety": 1.0, "manipulability": 1.0}
         self.C1, self.C2, self.Cs, self.Cm = C1, C2, Cs, Cm
         self.robot_model = robot_model  # optional; None disables eta_manipulability
+        # Pre-registered per-participant human joint limits [q_min, q_max]
+        # (4x2) and proximity threshold tau for the joint-safety factor.
+        # None -> performance.joint_safety_factor uses its documented
+        # defaults; passing them here does not change the factor's logic,
+        # only which limits/threshold it scores against.
+        self.joint_limits = joint_limits
+        self.proximity_threshold = proximity_threshold
 
         self.v_prev = np.zeros(3)
         self.v_s_filtered = np.zeros(3)
@@ -46,7 +54,9 @@ class SharedControlCore(object):
             factors["directness"] = perf.directness_factor(v_candidate, tangent, self.C2)
         if "joint_safety" in active_factors and q_human is not None:
             factors["joint_safety"] = perf.joint_safety_factor(
-                q_human, v_candidate, l1, l2, Cs=self.Cs, J_arm=J_arm_human)
+                q_human, v_candidate, l1, l2, Cs=self.Cs, J_arm=J_arm_human,
+                joint_limits=self.joint_limits,
+                proximity_threshold=self.proximity_threshold)
         if ("manipulability" in active_factors and J_robot is not None
                 and q_robot is not None and self.robot_model is not None):
             qdot = np.linalg.pinv(J_robot[:3, :]) @ v_candidate

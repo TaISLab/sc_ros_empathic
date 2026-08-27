@@ -1,0 +1,75 @@
+<?xml version="1.0"?>
+<!--
+  baseline_aan.launch  -  experimental condition F (paper Sec. V-B):
+  impedance-control assist-as-needed baseline of Zhang et al. [9],
+  nominal placement only.
+
+      roslaunch sc_ros_empathic baseline_aan.launch record:=true trial_label:=P03_nominal_F
+
+  See scripts/baseline_aan_node.py's docstring: the impedance / AAN
+  parameters below are PLACEHOLDERS and must be set to match [9] and
+  pre-registered before this is used for a published condition-F result.
+-->
+<launch>
+  <arg name="robot_ip" default="172.16.0.2"/>
+  <arg name="base_link" default="fr3_link0"/>
+
+  <arg name="path_center" default="[0.45, 0.0, 0.45]"/>
+  <arg name="path_radius" default="0.05"/>
+  <arg name="path_normal" default="[0.0, 0.0, 1.0]"/>
+
+  <arg name="rate_hz"     default="200.0"/>
+  <arg name="rviz"        default="true"/>
+  <arg name="show_plane"  default="true"/>
+  <arg name="rviz_config" default="$(find sc_ros_empathic)/rviz/shared_control.rviz"/>
+
+  <!-- shoulder/elbow/wrist points from the pipeline; recorded raw
+       (this node computes no FK). -->
+  <arg name="human_arm_points_topic" default="/right_arm/arm_points"/>
+
+  <arg name="record"      default="false"/>
+  <arg name="trial_label" default="trial_F"/>
+  <arg name="bag_dir"     default="$(env HOME)/sc_ros_empathic_bags"/>
+
+  <include file="$(find taislab_franka_controllers)/launch/cartesian_velocity_external_controller.launch">
+    <arg name="robot_ip"     value="$(arg robot_ip)"/>
+    <arg name="load_gripper" value="false"/>
+  </include>
+
+  <node pkg="sc_ros_empathic" type="baseline_aan_node.py"
+        name="shared_control_node" output="screen">
+    <param name="base_frame" value="$(arg base_link)"/>
+    <rosparam param="path_center" subst_value="true">$(arg path_center)</rosparam>
+    <param name="path_radius" value="$(arg path_radius)"/>
+    <rosparam param="path_normal" subst_value="true">$(arg path_normal)</rosparam>
+    <param name="rate_hz" value="$(arg rate_hz)"/>
+  </node>
+
+  <node pkg="sc_ros_empathic" type="rviz_visualization_node.py"
+        name="sc_ros_empathic_viz" output="screen">
+    <param name="base_frame" value="$(arg base_link)"/>
+    <rosparam param="path_center" subst_value="true">$(arg path_center)</rosparam>
+    <param name="path_radius" value="$(arg path_radius)"/>
+    <rosparam param="path_normal" subst_value="true">$(arg path_normal)</rosparam>
+    <param name="show_plane" value="$(arg show_plane)"/>
+  </node>
+
+  <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz"
+        args="-d $(arg rviz_config)"/>
+
+  <!-- OFF by default; record:=true starts it. '-o' timestamps the bag
+       name so re-runs never overwrite. Condition F computes no
+       eta/factors/joint_margins/manipulability, so those are absent. -->
+  <node if="$(arg record)" pkg="rosbag" type="record" name="trial_recorder"
+        output="screen"
+        args="-o $(arg bag_dir)/$(arg trial_label)
+              /franka_state_controller/franka_states
+              $(arg human_arm_points_topic)
+              /robot_vel_ctrl/vel_cmd
+              /shared_control_node/diag/condition
+              /shared_control_node/diag/v_h
+              /shared_control_node/diag/v_r
+              /shared_control_node/diag/v_s
+              /shared_control_node/diag/force
+              /shared_control_node/diag/path_progress"/>
+</launch>
