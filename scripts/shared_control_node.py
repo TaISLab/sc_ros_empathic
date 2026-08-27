@@ -22,6 +22,12 @@ Reads:
         Confirm the real ones with the visuo-tactile pipeline owner
         and override via the ROS params below -- no code change
         needed once confirmed, just launch-file arguments.
+  * robot Jacobian topic (~jacobian_source=topic, the default): the
+    FR3 Jacobian the taislab_controller C++ controller computes in
+    update(), as std_msgs/Float64MultiArray (the 6xN matrix flattened
+    row-major). Used for the manipulability factor; no PyKDL. Confirm
+    the topic name with the controller owner. ~jacobian_source=kdl
+    computes it locally from q instead.
 
 Experimental condition (~condition, paper Sec. V-B):
   A_standalone      no assistance -- shaped human admittance command only
@@ -248,24 +254,51 @@ class SharedControlNode(object):
         # volunteers -- it stays in config/shared_control.yaml.
         self.proximity_threshold = rospy.get_param('~proximity_threshold', 0.3)
 
+        # Robot Jacobian for the manipulability factor.
+        #   topic (default) -- the FR3 Jacobian the taislab_controller
+        #     C++ controller already computes in update(), published as
+        #     std_msgs/Float64MultiArray (6xN row-major). No PyKDL.
+        #   kdl  -- analytic Jacobian from q via PyKDL + /robot_description
+        #           (gives a true per-candidate predicted Jacobian).
+        #   none -- disable the manipulability factor.
         base_link = rospy.get_param('~base_link', 'fr3_link0')
         ee_link = rospy.get_param('~ee_link', 'fr3_link8')
-        try:
-            robot_model = RobotModel(backend='kdl', base_link=base_link, ee_link=ee_link)
-        except RuntimeError as e:
-            rospy.logerr('%s', e)
-            rospy.logerr('shared_control_node: disabling the manipulability '
-                          'factor for this run (active_factors will drop it).')
-            robot_model = None
+        self.jacobian_source = rospy.get_param('~jacobian_source', 'topic')
+        self.robot_jacobian_topic = rospy.get_param(
+            '~robot_jacobian_topic', '/taislab_controller/jacobian')
+        self.jac_rows = int(rospy.get_param('~robot_jacobian_rows', 6))
+        self.jac_cols = int(rospy.get_param('~robot_jacobian_cols', 7))
+        self.max_jacobian_age = rospy.get_param('~max_jacobian_age', 0.2)
+        self.robot_jac_stamp = None
+
+        robot_model = None
+        if self.jacobian_source == 'none':
+            rospy.loginfo('shared_control_node: ~jacobian_source=none -- '
+                          'manipulability factor disabled.')
+        elif self.jacobian_source == 'kdl':
+            try:
+                robot_model = RobotModel(backend='kdl', base_link=base_link,
+                                         ee_link=ee_link)
+            except RuntimeError as e:
+                rospy.logerr('%s', e)
+                rospy.logerr('shared_control_node: disabling the '
+                              'manipulability factor for this run.')
+        else:  # 'topic'
+            robot_model = RobotModel(backend='topic')
+            rospy.loginfo('shared_control_node: robot Jacobian from %s '
+                          '(%dx%d Float64MultiArray, row-major)',
+                          self.robot_jacobian_topic, self.jac_rows,
+                          self.jac_cols)
         self.manipulability_available = robot_model is not None
 
         if ('manipulability' in self.cond_factors
                 and not self.manipulability_available):
             rospy.logerr('shared_control_node: condition %s REQUIRES the '
-                          'manipulability factor but the KDL robot model '
-                          'failed to initialize -- this run will not be a '
-                          'valid %s trial. Fix PyKDL/URDF before recording.',
-                          self.condition_id, self.condition_id)
+                          'manipulability factor but no robot Jacobian '
+                          'source is available (~jacobian_source=%s) -- this '
+                          'run will not be a valid %s trial.',
+                          self.condition_id, self.jacobian_source,
+                          self.condition_id)
 
         self.core = SharedControlCore(
             dt_lookahead=rospy.get_param('~dt_lookahead', 0.2),
@@ -398,6 +431,9 @@ class SharedControlNode(object):
                           self._human_link_lengths_cb, queue_size=1)
         rospy.Subscriber(self.human_arm_points_topic, Float64MultiArray,
                           self._human_arm_points_cb, queue_size=1)
+        if self.jacobian_source == 'topic':
+            rospy.Subscriber(self.robot_jacobian_topic, Float64MultiArray,
+                              self._robot_jacobian_cb, queue_size=1)
 
         self.rate_hz = rospy.get_param('~rate_hz', 200.0)
         self.dt = 1.0 / self.rate_hz
@@ -451,6 +487,21 @@ class SharedControlNode(object):
         self.arm_points_raw = np.array(msg.data[0:9], dtype=float)
         self.arm_points_stamp = rospy.Time.now()
 
+    def _robot_jacobian_cb(self, msg):
+        n = self.jac_rows * self.jac_cols
+        if len(msg.data) != n:
+            rospy.logwarn_throttle(
+                5.0, 'shared_control_node: %s published %d values; expected '
+                '%d (%dx%d row-major). Ignoring.', self.robot_jacobian_topic,
+                len(msg.data), n, self.jac_rows, self.jac_cols)
+            return
+        J = np.asarray(msg.data, dtype=float).reshape(self.jac_rows,
+                                                      self.jac_cols)
+        now = rospy.Time.now()
+        self.core.robot_model.update_current_state(self.q_robot, J,
+                                                   stamp=now.to_sec())
+        self.robot_jac_stamp = now
+
     def _update_force(self, f_ext_raw):
         f_norm = np.linalg.norm(f_ext_raw)
         f_deadzone = (np.zeros(3) if f_norm < self.deadzone_N else
@@ -478,6 +529,18 @@ class SharedControlNode(object):
                 and (now - self.q_h_stamp).to_sec() <= self.max_human_state_age)
         l1, l2 = self._current_link_lengths()
         return q_ok and l1 is not None
+
+    def _jacobian_fresh(self):
+        """Whether the manipulability factor can run this cycle. KDL
+        computes on demand -> always fresh; the topic backend needs a
+        recent message (fail soft, like the human-state staleness)."""
+        if not self.manipulability_available:
+            return False
+        if self.jacobian_source != 'topic':
+            return True
+        return (self.robot_jac_stamp is not None
+                and (rospy.Time.now() - self.robot_jac_stamp).to_sec()
+                <= self.max_jacobian_age)
 
     def _shape_standalone(self, v_h):
         """Condition A output: LPF + speed cap on the human command,
@@ -558,6 +621,7 @@ class SharedControlNode(object):
     def run(self):
         rate = rospy.Rate(self.rate_hz)
         warned_stale_human_state = False
+        warned_stale_jacobian = False
 
         while not rospy.is_shutdown():
             if not self.have_robot_state:
@@ -583,13 +647,27 @@ class SharedControlNode(object):
             #    initialized. Fail SOFT (fewer factors), never fail
             #    SILENT-WRONG (use garbage q_h / a stale Jacobian).
             human_fresh = self._human_state_fresh()
+            jac_fresh = self._jacobian_fresh()
             active_factors = []
             for f in self.cond_factors:
                 if f == 'joint_safety' and not human_fresh:
                     continue
-                if f == 'manipulability' and not self.manipulability_available:
+                if f == 'manipulability' and not jac_fresh:
                     continue
                 active_factors.append(f)
+
+            need_jac = 'manipulability' in self.cond_factors
+            if (need_jac and self.manipulability_available and not jac_fresh
+                    and not warned_stale_jacobian):
+                rospy.logwarn('shared_control_node: robot Jacobian stale/'
+                               'missing on %s -- condition %s running WITHOUT '
+                               'manipulability until it recovers.',
+                               self.robot_jacobian_topic, self.condition_id)
+                warned_stale_jacobian = True
+            if need_jac and jac_fresh and warned_stale_jacobian:
+                rospy.loginfo('shared_control_node: robot Jacobian recovered, '
+                               'manipulability re-enabled.')
+                warned_stale_jacobian = False
 
             need_human = 'joint_safety' in self.cond_factors
             if need_human and not human_fresh and not warned_stale_human_state:
@@ -606,7 +684,7 @@ class SharedControlNode(object):
 
             # 4. Emergent command.
             self.J_robot = None
-            if self.manipulability_available:
+            if self.manipulability_available and jac_fresh:
                 self.J_robot = self.core.robot_model.jacobian(self.q_robot)
 
             l1_cur, l2_cur = self._current_link_lengths()

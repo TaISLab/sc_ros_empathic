@@ -13,7 +13,7 @@ manipulability/singularity avoidance).
   (ported, logic-unchanged, from the offline simulation/verification
   package this law was tuned in): `shared_control_core.py`,
   `performance.py`, `dh_utils.py` (human-arm kinematics),
-  `robot_model.py` (robot Jacobian via PyKDL), `path_follower.py`
+  `robot_model.py` (robot Jacobian: published topic or PyKDL), `path_follower.py`
   (reactive pure-pursuit-style path following), `experiment.py`
   (experimental-condition table, lap counter, joint-margin observable
   -- protocol glue only, no control-law logic), `subject_config.py`
@@ -57,10 +57,11 @@ Select with `condition:=<id>`:
 An unknown `condition` aborts node startup with the valid list -- there
 is no silent default. Each cycle the requested factor set is
 intersected with what the sensors can support (fresh `q_h` for
-`joint_safety`, a working KDL model for `manipulability`); a downgrade
-is logged (`logwarn`/`logerr`), never silent. If a condition that
-*requires* `manipulability` (D, E) starts without a working KDL model,
-the node logs an error at startup -- fix PyKDL/URDF before recording.
+`joint_safety`, a fresh robot Jacobian for `manipulability`); a
+downgrade is logged (`logwarn`/`logerr`), never silent. If a condition
+that *requires* `manipulability` (D, E) starts with
+`~jacobian_source:=none` (or KDL failing to init), the node logs an
+error at startup.
 
 ## Circle placement (paper Sec. V-A)
 
@@ -153,6 +154,7 @@ Recorded topics (`shared_control.launch`):
 | `/right_arm/joint_states` (`~human_joint_state_topic`) | `sensor_msgs/JointState` | human `q1..q4` from the visuo-tactile pipeline |
 | `/right_arm/link_lengths` (`~human_link_lengths_topic`) | `std_msgs/Float64MultiArray` | `[l1, l2]` |
 | `/right_arm/arm_points` (`~human_arm_points_topic`) | `std_msgs/Float64MultiArray` (PLACEHOLDER) | shoulder/elbow/wrist points `[sx,sy,sz, ex,ey,ez, wx,wy,wz]` in the pipeline's **fixed** frame -- captures shoulder movement during the trial |
+| `/taislab_controller/jacobian` (`~robot_jacobian_topic`) | `std_msgs/Float64MultiArray` (PLACEHOLDER) | FR3 6xN Jacobian, row-major, from the C++ controller (only with `~jacobian_source:=topic`) |
 | `/robot_vel_ctrl/vel_cmd` (`~cmd_topic`) | `geometry_msgs/TwistStamped` | emergent command `v_s` sent to the robot |
 | `~/eta` | `Float64MultiArray` | `[eta_h, eta_r, eta_s]` |
 | `~/diag/condition` | `String` (latched) | condition id |
@@ -161,7 +163,7 @@ Recorded topics (`shared_control.launch`):
 | `~/diag/v_h`, `~/diag/v_r`, `~/diag/v_s` | `Vector3Stamped` | the three velocity terms |
 | `~/diag/force` | `Vector3Stamped` | filtered interaction force driving the admittance |
 | `~/diag/joint_margins` | `Float64MultiArray` | `[m1, m2, m3, m4, min]` (only while human state fresh) |
-| `~/diag/manipulability` | `Float64` | `w(q_r) = sqrt(det(J J^T))` (only if KDL up) |
+| `~/diag/manipulability` | `Float64` | `w(q_r) = sqrt(det(J J^T))` (only while the Jacobian source is live) |
 | `~/diag/path_progress` | `Float64MultiArray` | `[s_near, lap, lap+s_near, cross_track_err_m]` |
 | `~/diag/arm_points` | `geometry_msgs/PoseArray` | pipeline shoulder/elbow/wrist re-published (`poses[0..2]`), stamped, frame `~human_points_frame` |
 | `~/diag/arm_points_fk` | `geometry_msgs/PoseArray` | shoulder/elbow/wrist from **FK** on `(q_h, l1, l2)`, frame `human_shoulder` (shoulder at origin) -- consistency check vs. the pipeline points; does **not** show shoulder drift |
@@ -201,15 +203,33 @@ without that factor; for A, B, D it makes no difference. Run
 `rostopic hz <topic>` on both before trusting a C/E session, and
 override via launch args once confirmed (no code change needed).
 
-The robot Jacobian (needed for the manipulability factor) is computed
-analytically via PyKDL from `/robot_description` -- **not** from a
-`franka_ros`-published Jacobian topic, which does not exist (checked
-against the authoritative `franka_msgs/FrankaState.msg`; see
-`robot_model.py`'s docstring). Requires `python_orocos_kdl` and
-`kdl_parser_py` and a loaded FR3 URDF before this node starts.
+The robot Jacobian (for the manipulability factor) comes from
+`~jacobian_source`:
 
-`~base_link`/`~ee_link` default to `fr3_link0`/`fr3_link8`: check these
-match your actual URDF link names.
+- **`topic`** (default): the 6xN FR3 Jacobian the `taislab_controller`
+  C++ Cartesian-velocity controller already computes in `update()`,
+  published as `std_msgs/Float64MultiArray` (flattened **row-major**)
+  on `~robot_jacobian_topic` (PLACEHOLDER `/taislab_controller/jacobian`
+  -- confirm with the controller owner; set `~robot_jacobian_rows` /
+  `~robot_jacobian_cols` if not 6x7). No PyKDL, and it is exactly the
+  Jacobian the 1 kHz loop uses. If the topic goes stale the
+  manipulability factor drops (fail soft), same as the human-state
+  staleness. **Lookahead caveat:** with only the current-J stream there
+  is no model to evaluate `J(q + qdot_candidate*dt)`, so the predicted
+  Jacobian is the published one propagated forward *in time* (finite
+  difference of the last two messages); `eta_k4` is then the same for
+  `v_h`/`v_r`/blend -- it reduces authority when the trajectory heads
+  toward a singularity rather than ranking the candidates. Per-candidate
+  scoring needs `jacobian_source:=kdl`.
+- **`kdl`**: analytic Jacobian from `q` via PyKDL + `/robot_description`
+  (true per-candidate predicted Jacobian). Requires `python_orocos_kdl`,
+  `kdl_parser_py` and a loaded FR3 URDF; `~base_link` / `~ee_link`
+  (default `fr3_link0` / `fr3_link8`) must match the URDF.
+- **`none`**: manipulability factor disabled.
+
+`franka_ros` does **not** publish a Jacobian field (checked against
+`franka_msgs/FrankaState.msg`), which is why one of the two above is
+needed.
 
 ## Run
 
