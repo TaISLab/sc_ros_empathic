@@ -33,11 +33,20 @@ jacobian_source: analytic
 max_jacobian_age: 0.2     # s; topic mode: older -> factor dropped, warned
 
 # --- Reactive path follower ----------------------------------------
-# v_r = cruise_speed * tangent + Ka * (x_d - x)
-Ka: 1.0                   # proportional (cross-track) gain, 1/s; was 2.0
-rho_min: 0.03            # pure-pursuit lookahead when on the path [m]
+# lookahead : v_r = cruise*tangent(x_d) + Ka*(x_d - x)  -- the [1] law;
+#             cuts corners under lag -> traced circle < reference.
+# crosstrack: v_r = cruise*tangent(s_near) + Ka*(P(s_near) - x) -- pull
+#             to the nearest reference point; tracks the reference
+#             radius (not the [1] law).
+follower_mode: crosstrack
+Ka: 1.0                   # proportional gain, 1/s; was 2.0
+rho_min: 0.02            # pure-pursuit lookahead when on the path [m] (larger -> smaller traced circle)
 cruise_speed: 0.03       # tangential feed-forward around the circle [m/s]; 0 = proportional-only
 lam: 1.02
+
+# Trial length: end after this many laps (0 = until Ctrl-C). Paper's
+# trial = 4 loops, first discarded as training.
+trial_laps: 0
 
 # --- Admittance model (force -> human-intent velocity v_h) ---------
 admittance_mass:    [2.0, 2.0, 2.0]     # M_h, per Cartesian axis (larger = more sluggish)

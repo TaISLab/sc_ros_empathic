@@ -71,12 +71,15 @@ cartesian_velocity_external_controller is built for. Re-benchmark
 do not assume it silently matches the paper's per-cycle timing figures.
 """
 
+import csv
+import os
+
 import numpy as np
 import rospy
 from franka_msgs.msg import FrankaState
 from geometry_msgs.msg import Pose, PoseArray, TwistStamped, Vector3Stamped
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Float64, Float64MultiArray, String
+from std_msgs.msg import Bool, Float64, Float64MultiArray, String
 from std_srvs.srv import Empty, EmptyResponse
 
 from sc_ros_empathic.shared_control_core import SharedControlCore
@@ -198,14 +201,23 @@ class SharedControlNode(object):
         # cruise_speed: tangential feed-forward so the robot keeps
         # advancing along the path even at near-zero cross-track error
         # (a purely proportional v_r can stall there).
-        rho_min = rospy.get_param('~rho_min', 0.03)
+        rho_min = rospy.get_param('~rho_min', 0.02)
         lam = rospy.get_param('~lam', 1.02)
         cruise_speed = rospy.get_param('~cruise_speed', 0.03)
+        # 'crosstrack' = pull to the nearest reference point (tracks the
+        # reference radius); 'lookahead' = the [1] virtual-sphere law
+        # (cuts corners under loop lag -> traced circle smaller than the
+        # reference).
+        follower_mode = rospy.get_param('~follower_mode', 'crosstrack')
         self.path = CirclePath(center=center, radius=radius, normal=normal)
         self.follower = ReactivePathFollower(
             self.path, Ka=Ka, rho_min=rho_min, lam=lam,
-            cruise_speed=cruise_speed)
+            cruise_speed=cruise_speed, mode=follower_mode)
         self.lap_counter = LapCounter()
+        # Trial ends after this many laps (0 = run until Ctrl-C). The
+        # paper's trial is 4 loops, the first discarded as training.
+        self.trial_laps = int(rospy.get_param('~trial_laps', 0))
+        self._trial_done = False
 
         # ------------------------------------------------------------
         # Admittance model for v_h (force -> human-intent velocity).
@@ -448,13 +460,46 @@ class SharedControlNode(object):
             'arm_points_layout': rospy.Publisher('~diag/arm_points_layout',
                                                   String, queue_size=1,
                                                   latch=True),
+            'trial_done': rospy.Publisher('~diag/trial_done', Bool,
+                                           queue_size=1, latch=True),
         }
+        self.diag['trial_done'].publish(Bool(data=False))
         self.diag['condition'].publish(String(data=self.condition_id))
         self.diag['factors_layout'].publish(
             String(data=','.join(FACTOR_SLOTS)))
         self.diag['arm_points_layout'].publish(String(data='shoulder,elbow,wrist'))
 
         rospy.Service('~tare', Empty, self._tare_srv)
+
+        # Optional plain-CSV log (one row per control cycle) -- an
+        # analysis-ready file that does not need the rosbag. ~csv_path
+        # gives an explicit file; else ~csv_dir auto-names
+        # <condition>_<stamp>.csv; empty -> no CSV.
+        self.csv_fh = None
+        self.csv_w = None
+        csv_path = rospy.get_param('~csv_path', '')
+        csv_dir = rospy.get_param('~csv_dir', '')
+        if not csv_path and csv_dir:
+            csv_path = os.path.join(
+                os.path.expanduser(csv_dir),
+                '%s_%d.csv' % (self.condition_id, int(rospy.Time.now().to_sec())))
+        if csv_path:
+            csv_path = os.path.expanduser(csv_path)
+            d = os.path.dirname(csv_path)
+            if d and not os.path.isdir(d):
+                os.makedirs(d)
+            self.csv_fh = open(csv_path, 'w')
+            self.csv_w = csv.writer(self.csv_fh)
+            self.csv_w.writerow(
+                ['t', 'condition', 'lap', 's_near', 'cross_track',
+                 'px', 'py', 'pz',
+                 'vh_x', 'vh_y', 'vh_z', 'vr_x', 'vr_y', 'vr_z',
+                 'vs_x', 'vs_y', 'vs_z', 'fx', 'fy', 'fz',
+                 'eta_h', 'eta_r', 'eta_s',
+                 'smoothness_h', 'directness_h', 'joint_safety_h', 'manip_h',
+                 'm1', 'm2', 'm3', 'm4', 'm_min', 'w_qr'])
+            rospy.loginfo('shared_control_node: CSV log -> %s', csv_path)
+            rospy.on_shutdown(self._close_csv)
 
         rospy.Subscriber(self.franka_states_topic, FrankaState,
                           self._franka_state_cb, queue_size=1)
@@ -678,6 +723,42 @@ class SharedControlNode(object):
                 self._pose_array((sh, el, wr), 'human_shoulder', stamp))
 
     # ------------------------------------------------------------
+    # CSV log (one row per cycle; analysis without the rosbag)
+    # ------------------------------------------------------------
+    def _write_csv_row(self, stamp, s_near, lap, cross_track, v_r, v_s,
+                        factors_h, eta_h, eta_r, eta_s, human_fresh,
+                        l1_cur, l2_cur):
+        m = [float('nan')] * 5
+        if human_fresh and self.q_h is not None:
+            margins, mmin = joint_margins(self.q_h, self.human_joint_limits)
+            m = list(map(float, margins)) + [float(mmin)]
+        w = float('nan')
+        if self.J_robot is not None:
+            w = float(manipulability_index(self.J_robot))
+        fh = factors_h or {}
+        row = [stamp.to_sec(), self.condition_id, lap, s_near, cross_track,
+               self.x[0], self.x[1], self.x[2],
+               self.v_h[0], self.v_h[1], self.v_h[2],
+               v_r[0], v_r[1], v_r[2], v_s[0], v_s[1], v_s[2],
+               self.f_filtered[0], self.f_filtered[1], self.f_filtered[2],
+               eta_h, eta_r, eta_s,
+               fh.get('smoothness', float('nan')),
+               fh.get('directness', float('nan')),
+               fh.get('joint_safety', float('nan')),
+               fh.get('manipulability', float('nan'))] + m + [w]
+        self.csv_w.writerow(['%.6g' % v if isinstance(v, float) else v
+                             for v in row])
+
+    def _close_csv(self):
+        if self.csv_fh is not None:
+            try:
+                self.csv_fh.flush()
+                self.csv_fh.close()
+            except Exception:
+                pass
+            self.csv_fh = None
+
+    # ------------------------------------------------------------
     # Control loop
     # ------------------------------------------------------------
     def run(self):
@@ -699,6 +780,16 @@ class SharedControlNode(object):
             # 2. Path progress (observable) + robot command.
             s_near, cross_track = self.follower.progress(self.x)
             lap = self.lap_counter.update(s_near)
+
+            if (self.trial_laps > 0 and lap >= self.trial_laps
+                    and not self._trial_done):
+                self._trial_done = True
+                self.diag['trial_done'].publish(Bool(data=True))
+                rospy.loginfo('shared_control_node: trial complete (%d laps '
+                              'done). Holding zero velocity -- Ctrl-C to end '
+                              'the session and close the bag/CSV.',
+                              self.trial_laps)
+
             if self.cond_use_robot:
                 v_r, tangent = self.follower.robot_command(self.x)
             else:
@@ -772,6 +863,9 @@ class SharedControlNode(object):
                 factors_h, factors_r = {}, {}
                 self.core.v_prev = v_s  # keep smoothness reference coherent
 
+            if self._trial_done:
+                v_s = np.zeros(3)       # trial over -> hold still
+
             # 5. Publish command + eta + diagnostics.
             stamp = rospy.Time.now()
 
@@ -790,6 +884,11 @@ class SharedControlNode(object):
             self._publish_diag(stamp, self.v_h, v_r, v_s, factors_h,
                                 factors_r, s_near, lap, cross_track,
                                 human_fresh, l1_cur, l2_cur)
+
+            if self.csv_w is not None:
+                self._write_csv_row(stamp, s_near, lap, cross_track, v_r, v_s,
+                                     factors_h, eta_h, eta_r, eta_s,
+                                     human_fresh, l1_cur, l2_cur)
 
             rate.sleep()
 

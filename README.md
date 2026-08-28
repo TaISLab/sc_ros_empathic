@@ -179,7 +179,29 @@ link-lengths topic reliably, so `l1, l2` fall back (topic fresh ->
 subject file -> `~human_link_lengths`) and `joint_safety` only drops if
 none is available. `q_h` always needs the live topic.
 
-## Recording trials
+## Trial length
+
+By default the node **runs until Ctrl-C** -- there is no automatic
+stop. Set `trial_laps:=N` to end after N completed laps (the paper's
+trial is 4 loops, the first discarded as training). At the end the node
+holds zero velocity, logs "trial complete", and latches
+`~diag/trial_done = true`; you still Ctrl-C the launch to stop RViz and
+close the bag / CSV. Lap count comes from `~diag/path_progress[1]`
+(and `[2] = lap + s`, a continuous progress signal).
+
+## Logging (CSV, no rosbag needed)
+
+`csv:=true` writes one row per control cycle to
+`~/sc_ros_empathic_logs/<condition>_<stamp>.csv` (override the dir with
+`csv_dir:=`, or give an exact file with `csv_path:=`). Columns:
+`t, condition, lap, s_near, cross_track, px..pz, vh_*, vr_*, vs_*,
+fx..fz, eta_h, eta_r, eta_s, smoothness_h, directness_h,
+joint_safety_h, manip_h, m1..m4, m_min, w_qr` -- everything the
+Sec. V-D metrics and the traced-path plots need, directly loadable
+with pandas. The file is closed cleanly on Ctrl-C. This is independent
+of `record:=true` (the rosbag); use either or both.
+
+## Recording trials (rosbag)
 
 **Off by default.** No bag is written unless you pass `record:=true`.
 Then a `rosbag record` node writes to
@@ -362,13 +384,18 @@ points; `~trail_len:=0` disables it).
 `A_standalone` only relays human force -- use `B_baseline_m2` for a
 first motion check.
 
-**Circle shows, loop is stable, but the robot barely advances on its
-own.** The path follower's proportional term alone gives only
-`~Ka * rho_min` m/s of traversal when the EE sits on the circle, and
-the smoothness factor can stall it near zero speed. The command is
-`v_r = cruise_speed * tangent + Ka * (x_d - x)`: raise `cruise_speed`
-(`cruise_speed:=0.05`) for a faster lap, and/or `rho_min:=0.04`.
-`cruise_speed:=0` restores the pure proportional law.
+**Robot barely advances on its own.** `v_r = cruise_speed * tangent
++ Ka * (...)`: raise `cruise_speed` (`cruise_speed:=0.05`) for a faster
+lap. `cruise_speed:=0` gives the pure proportional law.
+
+**Traced circle is noticeably smaller than the reference.** The
+`lookahead` follower steers along the chord to a point ahead on the
+circle, so under loop lag it settles on a smaller circle (worse for a
+larger `rho_min`). The default is now `follower_mode:=crosstrack`,
+which pulls to the *nearest* reference point and tracks the reference
+radius. `follower_mode:=lookahead` restores the verbatim [1]
+virtual-sphere law (accept/report the radius offset, or lower
+`rho_min:=0.015`).
 
 **Is the loop rate enough?** For the task, yes -- human motion is a
 few Hz and the C++ controller zero-order-holds the last command at

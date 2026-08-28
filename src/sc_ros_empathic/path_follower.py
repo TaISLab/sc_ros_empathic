@@ -85,7 +85,7 @@ class CirclePath:
 
 class ReactivePathFollower:
     def __init__(self, path, lam=1.02, rho_min=0.015, Ka=2.0, n_samples=360,
-                 cruise_speed=0.0):
+                 cruise_speed=0.0, mode="lookahead"):
         self.path = path
         self.lam = lam
         self.rho_min = rho_min
@@ -96,6 +96,18 @@ class ReactivePathFollower:
         # progress on a tracing task even when the cross-track error
         # (and hence the proportional term) is ~0.
         self.cruise_speed = float(cruise_speed)
+        # "lookahead": the virtual-sphere pure-pursuit law of [1],
+        #   v_r = cruise*tangent(x_d) + Ka*(x_d - x). Steers along the
+        #   chord to the lookahead point, so it CUTS CORNERS -- under
+        #   loop lag it settles on a circle smaller than the reference,
+        #   more so for a larger rho_min.
+        # "crosstrack": v_r = cruise*tangent(s_near) + Ka*(P(s_near) - x)
+        #   -- tangential feed-forward plus a pull to the NEAREST
+        #   reference point. No corner-cutting: it tracks the reference
+        #   radius. Not the [1] law; use it when radius fidelity matters.
+        if mode not in ("lookahead", "crosstrack"):
+            raise ValueError("mode must be 'lookahead' or 'crosstrack'")
+        self.mode = mode
 
     def _dist_to_path(self, x, s):
         return float(np.linalg.norm(self.path.point(s) - x))
@@ -130,8 +142,14 @@ class ReactivePathFollower:
         return x_d, tangent, best_s
 
     def robot_command(self, x):
-        """Returns (v_r, tangent) for the path-following command
-        v_r = cruise_speed * tangent + Ka * (x_d - x)."""
+        """Returns (v_r, tangent). See __init__ for the two modes."""
+        x = np.asarray(x, dtype=float)
+        if self.mode == "crosstrack":
+            s_near = self.path.nearest_s(x, self.n_samples)
+            p_near = self.path.point(s_near)
+            tangent = self.path.tangent(s_near)
+            v_r = self.cruise_speed * tangent + self.Ka * (p_near - x)
+            return v_r, tangent
         x_d, tangent, _ = self.next_goal(x)
         v_r = self.cruise_speed * tangent + self.Ka * (x_d - x)
         return v_r, tangent

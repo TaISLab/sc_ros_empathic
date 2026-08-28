@@ -90,8 +90,9 @@
        config/shared_control.yaml. Conservative starting values: raise
        once the loop is confirmed stable on this robot. -->
   <arg name="Ka"                 default="1.0"/>   <!-- path-following P gain (1/s); was 2.0 -->
-  <arg name="rho_min"            default="0.03"/>  <!-- pure-pursuit lookahead on the path [m] -->
+  <arg name="rho_min"            default="0.02"/>  <!-- pure-pursuit lookahead on the path [m] -->
   <arg name="cruise_speed"       default="0.03"/>  <!-- tangential feed-forward around the circle [m/s] -->
+  <arg name="follower_mode"     default="crosstrack"/>  <!-- crosstrack (tracks the reference radius) | lookahead ([1] law, cuts corners under lag) -->
   <arg name="v_max"              default="0.08"/>  <!-- EE speed cap [m/s] -->
   <arg name="lpf_alpha"          default="0.15"/>  <!-- command LPF (smaller = smoother) -->
   <arg name="admittance_mass"    default="[2.0, 2.0, 2.0]"/>
@@ -109,10 +110,21 @@
   <!-- Gains / weights / model params (PLACEHOLDER values, see file). -->
   <arg name="config" default="$(find sc_ros_empathic)/config/shared_control.yaml"/>
 
+  <!-- Trial ends after this many laps (0 = run until Ctrl-C). The
+       paper's trial is 4 loops (first = training). At the end the node
+       holds zero velocity and latches ~diag/trial_done=true; Ctrl-C to
+       close the bag/CSV. -->
+  <arg name="trial_laps" default="0"/>
+
   <!-- Bag recording of the trial. -->
   <arg name="record"      default="false"/>
   <arg name="trial_label" default="trial"/>
   <arg name="bag_dir"     default="$(env HOME)/sc_ros_empathic_bags"/>
+
+  <!-- Plain-CSV log (one row per cycle), analysis without the bag.
+       csv:=true -> ~/sc_ros_empathic_logs/<condition>_<stamp>.csv -->
+  <arg name="csv"     default="false"/>
+  <arg name="csv_dir" default="$(env HOME)/sc_ros_empathic_logs"/>
 
   <!-- ================= robot bring-up (OPT-IN) ================= -->
   <!-- OFF by default: in this lab the FR3 bring-up + the external
@@ -151,6 +163,9 @@
     <param name="Ka" value="$(arg Ka)"/>
     <param name="rho_min" value="$(arg rho_min)"/>
     <param name="cruise_speed" value="$(arg cruise_speed)"/>
+    <param name="follower_mode" value="$(arg follower_mode)"/>
+    <param name="trial_laps" value="$(arg trial_laps)"/>
+    <param name="csv_dir" value="$(eval csv_dir if str(csv).lower() == 'true' else '')"/>
     <param name="v_max" value="$(arg v_max)"/>
     <param name="lpf_alpha" value="$(arg lpf_alpha)"/>
     <rosparam param="admittance_mass" subst_value="true">$(arg admittance_mass)</rosparam>
