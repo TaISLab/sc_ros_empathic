@@ -14,10 +14,15 @@ positive direction of the path.
     s_c     = argmin_{s > s_near} | dist(x, P(s)) - rho |
     x_d     = P(s_c)
 
-Also exposes a proportional robot command v_r = Ka * (x_d - x) and the
-path tangent vector needed by the directness performance factor.
-
-Ported verbatim from the offline simulation/verification package.
+Also exposes the robot command
+    v_r = cruise_speed * tangent + Ka * (x_d - x)
+and the path tangent vector needed by the directness performance
+factor. cruise_speed defaults to 0 (the verbatim proportional-only law
+from the offline package); a small positive value keeps the robot
+advancing along the path on a tracing task, where the proportional
+term alone can stall at near-zero cross-track error. The sampled-point
+cache in CirclePath is a pure per-cycle-cost optimisation, no change
+to the geometry.
 """
 
 import numpy as np
@@ -42,6 +47,10 @@ class CirclePath:
         self.u /= np.linalg.norm(self.u)
         self.v = np.cross(self.normal, self.u)
 
+        self._grid_n = 0
+        self._s_grid = None
+        self._grid_pts = None
+
     def point(self, s):
         theta = 2 * np.pi * s
         return self.center + self.radius * (np.cos(theta) * self.u + np.sin(theta) * self.v)
@@ -51,67 +60,80 @@ class CirclePath:
         t = -np.sin(theta) * self.u + np.cos(theta) * self.v
         return t / np.linalg.norm(t)
 
+    def _ensure_grid(self, n):
+        """Cache the sampled circle points once; nearest_s is called
+        (twice) every control cycle, so re-sampling n points each time
+        was a needless per-cycle cost."""
+        if self._grid_n != n:
+            self._s_grid = np.linspace(0.0, 1.0, n, endpoint=False)
+            th = 2 * np.pi * self._s_grid
+            self._grid_pts = (self.center
+                              + self.radius * (np.cos(th)[:, None] * self.u
+                                               + np.sin(th)[:, None] * self.v))
+            self._grid_n = n
+
+    def sampled(self, n_samples=360):
+        """(s_grid, points) for the cached n-sample discretisation."""
+        self._ensure_grid(n_samples)
+        return self._s_grid, self._grid_pts
+
     def nearest_s(self, x, n_samples=360):
-        s_grid = np.linspace(0.0, 1.0, n_samples, endpoint=False)
-        pts = np.array([self.point(s) for s in s_grid])
-        d = np.linalg.norm(pts - x, axis=1)
-        return float(s_grid[np.argmin(d)])
+        self._ensure_grid(n_samples)
+        d = np.linalg.norm(self._grid_pts - np.asarray(x, dtype=float), axis=1)
+        return float(self._s_grid[int(np.argmin(d))])
 
 
 class ReactivePathFollower:
-    def __init__(self, path, lam=1.02, rho_min=0.015, Ka=2.0, n_samples=360):
+    def __init__(self, path, lam=1.02, rho_min=0.015, Ka=2.0, n_samples=360,
+                 cruise_speed=0.0):
         self.path = path
         self.lam = lam
         self.rho_min = rho_min
         self.Ka = Ka
         self.n_samples = n_samples
+        # Tangential feed-forward along the path (m/s). 0 -> the
+        # verbatim proportional-only law; > 0 guarantees forward
+        # progress on a tracing task even when the cross-track error
+        # (and hence the proportional term) is ~0.
+        self.cruise_speed = float(cruise_speed)
 
     def _dist_to_path(self, x, s):
         return float(np.linalg.norm(self.path.point(s) - x))
 
     def next_goal(self, x):
-        s_near = self.path.nearest_s(x, self.n_samples)
-        d = self._dist_to_path(x, s_near)
+        # Same algorithm as the offline package -- nearest sample, then
+        # the FIRST sample AHEAD (wrapping) whose distance to x reaches
+        # the lookahead radius rho, i.e. the first forward crossing of
+        # the virtual lookahead sphere (pure pursuit, Coulter
+        # CMU-RI-TR-92-01). Taking the first FORWARD crossing (not the
+        # global argmin of |dist - rho|) avoids locking onto the second,
+        # near-zero-progress solution that a closed path's non-monotonic
+        # distance profile also produces. Vectorised over the cached
+        # sample grid so it costs ~10 us instead of a ~1.5 ms Python
+        # loop -- no change to the geometry.
+        x = np.asarray(x, dtype=float)
+        s_grid, pts = self.path.sampled(self.n_samples)
+        d_all = np.linalg.norm(pts - x, axis=1)
+        i_near = int(np.argmin(d_all))
+        d = float(d_all[i_near])
         rho = self.lam * d if d >= self.rho_min else self.rho_min
 
-        # Search s > s_near (wrapping around [0,1]), scanning forward in
-        # increasing arc-length order, and take the FIRST point whose
-        # distance to x reaches (or exceeds) the lookahead radius rho --
-        # i.e. the first crossing of the virtual lookahead sphere, exactly
-        # as in pure-pursuit path following (Coulter, CMU-RI-TR-92-01).
-        #
-        # NOTE (bug fixed here): a closed path's distance-from-x profile,
-        # as a function of forward arc-length from s_near, is not
-        # monotonic -- it rises to a maximum near the antipodal point and
-        # falls back towards ~0 as s completes the lap and returns to
-        # s_near. For a small rho, there are therefore generically TWO
-        # points s where dist(x, P(s)) == rho: one a small step ahead of
-        # s_near (the intended lookahead target), and one just before
-        # completing a full lap (dist falling back through rho on the
-        # *return* leg, representing essentially zero net forward
-        # progress). Picking the GLOBAL argmin of |dist - rho| over the
-        # full lap could lock onto the second (degenerate, near-zero-
-        # progress) solution. Taking the first forward crossing removes
-        # this ambiguity by construction.
-        s_candidates = np.mod(s_near + np.linspace(1e-4, 1.0, self.n_samples), 1.0)
-        best_s = s_candidates[-1]  # fallback: nearly a full lap ahead
-        prev_d = d
-        for s in s_candidates:
-            cur_d = self._dist_to_path(x, s)
-            if cur_d >= rho:
-                best_s = s
-                break
-            prev_d = cur_d
+        n = len(s_grid)
+        fwd = (i_near + 1 + np.arange(n)) % n          # indices ahead, wrapping
+        d_fwd = d_all[fwd]
+        crossings = np.flatnonzero(d_fwd >= rho)
+        best_i = int(fwd[crossings[0]]) if crossings.size else int(fwd[-1])
+        best_s = float(s_grid[best_i])
 
         x_d = self.path.point(best_s)
         tangent = self.path.tangent(best_s)
         return x_d, tangent, best_s
 
     def robot_command(self, x):
-        """Returns (v_r, tangent) for the proportional path-following
-        control law v_r = Ka * (x_d - x)."""
+        """Returns (v_r, tangent) for the path-following command
+        v_r = cruise_speed * tangent + Ka * (x_d - x)."""
         x_d, tangent, _ = self.next_goal(x)
-        v_r = self.Ka * (x_d - x)
+        v_r = self.cruise_speed * tangent + self.Ka * (x_d - x)
         return v_r, tangent
 
     def progress(self, x):

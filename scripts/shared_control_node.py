@@ -192,9 +192,19 @@ class SharedControlNode(object):
         center = rospy.get_param('~path_center', [0.45, 0.0, 0.45])
         radius = rospy.get_param('~path_radius', 0.05)
         normal = rospy.get_param('~path_normal', [0.0, 0.0, 1.0])
-        Ka = rospy.get_param('~Ka', 2.0)
+        Ka = rospy.get_param('~Ka', 1.0)
+        # rho_min: pure-pursuit lookahead when on the path -> the
+        # traversal speed around the circle is ~Ka*rho_min + cruise_speed.
+        # cruise_speed: tangential feed-forward so the robot keeps
+        # advancing along the path even at near-zero cross-track error
+        # (a purely proportional v_r can stall there).
+        rho_min = rospy.get_param('~rho_min', 0.03)
+        lam = rospy.get_param('~lam', 1.02)
+        cruise_speed = rospy.get_param('~cruise_speed', 0.03)
         self.path = CirclePath(center=center, radius=radius, normal=normal)
-        self.follower = ReactivePathFollower(self.path, Ka=Ka)
+        self.follower = ReactivePathFollower(
+            self.path, Ka=Ka, rho_min=rho_min, lam=lam,
+            cruise_speed=cruise_speed)
         self.lap_counter = LapCounter()
 
         # ------------------------------------------------------------

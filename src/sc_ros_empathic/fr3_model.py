@@ -45,20 +45,30 @@ _DH = np.array([
 _FLANGE_D = 0.107   # fixed translation along z7 to fr3_link8
 
 
-def _rx(alpha):
+def _rx_dx(alpha, a):
+    """Constant Rx(alpha) . Dx(a)."""
     c, s = np.cos(alpha), np.sin(alpha)
-    return np.array([[1.0, 0.0, 0.0, 0.0],
+    return np.array([[1.0, 0.0, 0.0, a],
                      [0.0,   c,  -s, 0.0],
                      [0.0,   s,   c, 0.0],
                      [0.0, 0.0, 0.0, 1.0]])
 
 
+# The DH alphas and a's are fixed, so Rx(alpha_{i-1}) . Dx(a_{i-1}) is a
+# constant per joint -- precompute it (was rebuilt from a nested list
+# every call, the dominant cost of the per-cycle Jacobian).
+_RXDX = [_rx_dx(_DH[i, 2], _DH[i, 0]) for i in range(N_JOINTS)]
+_DZ = _DH[:, 1].copy()   # d_i
+
+
 def _rz(theta):
     c, s = np.cos(theta), np.sin(theta)
-    return np.array([[c,  -s, 0.0, 0.0],
-                     [s,   c, 0.0, 0.0],
-                     [0.0, 0.0, 1.0, 0.0],
-                     [0.0, 0.0, 0.0, 1.0]])
+    R = np.eye(4)
+    R[0, 0] = c
+    R[0, 1] = -s
+    R[1, 0] = s
+    R[1, 1] = c
+    return R
 
 
 def fk_frames(q):
@@ -75,16 +85,11 @@ def fk_frames(q):
     axes = np.zeros((N_JOINTS, 3))
     origins = np.zeros((N_JOINTS, 3))
     for i in range(N_JOINTS):
-        a, d, alpha = _DH[i]
-        # frame in which theta_i acts: after Rx(alpha_{i-1}) Dx(a_{i-1})
-        M = T @ _rx(alpha)
-        M[0, 3] += a * M[0, 0]
-        M[1, 3] += a * M[1, 0]
-        M[2, 3] += a * M[2, 0]
+        M = T @ _RXDX[i]               # frame in which theta_i acts
         axes[i] = M[:3, 2]
         origins[i] = M[:3, 3]
         Tz = _rz(q[i])
-        Tz[2, 3] = d
+        Tz[2, 3] = _DZ[i]
         T = M @ Tz
     T = T.copy()
     T[:3, 3] += _FLANGE_D * T[:3, 2]

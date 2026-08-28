@@ -89,7 +89,9 @@
   <!-- Loop-tuning knobs, exposed so you can iterate without editing
        config/shared_control.yaml. Conservative starting values: raise
        once the loop is confirmed stable on this robot. -->
-  <arg name="Ka"                 default="1.0"/>   <!-- path-following gain (1/s); was 2.0 -->
+  <arg name="Ka"                 default="1.0"/>   <!-- path-following P gain (1/s); was 2.0 -->
+  <arg name="rho_min"            default="0.03"/>  <!-- pure-pursuit lookahead on the path [m] -->
+  <arg name="cruise_speed"       default="0.03"/>  <!-- tangential feed-forward around the circle [m/s] -->
   <arg name="v_max"              default="0.08"/>  <!-- EE speed cap [m/s] -->
   <arg name="lpf_alpha"          default="0.15"/>  <!-- command LPF (smaller = smoother) -->
   <arg name="admittance_mass"    default="[2.0, 2.0, 2.0]"/>
@@ -147,6 +149,8 @@
     <param name="path_radius" value="$(arg path_radius)"/>
     <rosparam param="path_normal" subst_value="true">$(arg path_normal)</rosparam>
     <param name="Ka" value="$(arg Ka)"/>
+    <param name="rho_min" value="$(arg rho_min)"/>
+    <param name="cruise_speed" value="$(arg cruise_speed)"/>
     <param name="v_max" value="$(arg v_max)"/>
     <param name="lpf_alpha" value="$(arg lpf_alpha)"/>
     <rosparam param="admittance_mass" subst_value="true">$(arg admittance_mass)</rosparam>

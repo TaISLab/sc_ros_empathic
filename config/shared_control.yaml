@@ -33,7 +33,11 @@ jacobian_source: analytic
 max_jacobian_age: 0.2     # s; topic mode: older -> factor dropped, warned
 
 # --- Reactive path follower ----------------------------------------
-Ka: 1.0                   # proportional path-following gain 1/s (v_r = Ka (x_d - x)); was 2.0
+# v_r = cruise_speed * tangent + Ka * (x_d - x)
+Ka: 1.0                   # proportional (cross-track) gain, 1/s; was 2.0
+rho_min: 0.03            # pure-pursuit lookahead when on the path [m]
+cruise_speed: 0.03       # tangential feed-forward around the circle [m/s]; 0 = proportional-only
+lam: 1.02
 
 # --- Admittance model (force -> human-intent velocity v_h) ---------
 admittance_mass:    [2.0, 2.0, 2.0]     # M_h, per Cartesian axis (larger = more sluggish)

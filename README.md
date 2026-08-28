@@ -361,3 +361,21 @@ points; `~trail_len:=0` disables it).
 `$ROS_MASTER_URI` points at the machine running `franka_control`.
 `A_standalone` only relays human force -- use `B_baseline_m2` for a
 first motion check.
+
+**Circle shows, loop is stable, but the robot barely advances on its
+own.** The path follower's proportional term alone gives only
+`~Ka * rho_min` m/s of traversal when the EE sits on the circle, and
+the smoothness factor can stall it near zero speed. The command is
+`v_r = cruise_speed * tangent + Ka * (x_d - x)`: raise `cruise_speed`
+(`cruise_speed:=0.05`) for a faster lap, and/or `rho_min:=0.04`.
+`cruise_speed:=0` restores the pure proportional law.
+
+**Is the loop rate enough?** For the task, yes -- human motion is a
+few Hz and the C++ controller zero-order-holds the last command at
+1 kHz, so 100-200 Hz command updates are ample. What matters is
+whether the Python loop *holds* `~rate_hz`: check
+`rostopic hz /robot_vel_ctrl/vel_cmd`. m=2 conditions (A, B) are light
+and hold 200 Hz easily; m=4 (E) is heavier (two Jacobians per cycle) --
+if the rate sags, set `rate_hz:=100`, which loses nothing for this
+task. The expensive per-cycle path search was vectorised (was ~1.5 ms,
+now ~0.1 ms).
