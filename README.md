@@ -37,32 +37,59 @@ manipulability/singularity avoidance).
   demographics (sex/age/height/mass), arm segment lengths,
   pre-registered joint ranges (see `subject_template.yaml`). Nothing
   experiment-specific.
-- `launch/shared_control.launch` -- brings up the FR3's external
-  Cartesian velocity controller, the shared-control + RViz nodes, and
-  (optionally) a `rosbag record` of the trial.
+- `launch/shared_control.launch` -- runs the shared-control node + RViz
+  and, optionally, a `rosbag record` of the trial. The FR3 bring-up +
+  external Cartesian velocity controller are opt-in
+  (`robot_bringup:=true`); by default the launch attaches to an
+  already-running `franka_state_controller` and `~cmd_topic`.
 - `launch/baseline_aan.launch` -- same, for condition F.
 
 ## Experimental conditions (paper Sec. V-B)
 
-Select with `condition:=<id>`:
+Every candidate command (`v_h` human, `v_r` robot, blend) gets an
+efficiency `eta` in `[0, 1]` = weighted mean of the **active factors**.
+The condition sets which factors are active and whether the robot's
+path-following command `v_r` takes part at all. Select with
+`condition:=<id>`.
 
-| id                 | m | robot assists | factors                                            |
-|--------------------|---|---------------|----------------------------------------------------|
-| `A_standalone`     | - | no            | none -- shaped human admittance command only       |
-| `B_baseline_m2`    | 2 | yes           | smoothness, directness (baseline reactive SC [1])  |
-| `C_jointsafety_m3` | 3 | yes           | baseline + human joint-limit safety (ablation)     |
-| `D_manip_m3`       | 3 | yes           | baseline + robot manipulability (ablation)         |
-| `E_extended_m4`    | 4 | yes           | all four factors (proposed)                        |
-| `F_impedance_aan`  | - | yes           | separate node: `roslaunch sc_ros_empathic baseline_aan.launch` |
+| id | m | robot assists | active factors | what it isolates / role | needs | placement |
+|---|---|---|---|---|---|---|
+| **`A_standalone`** | - | **no** | none | No assistance: only `v_h` is shaped (admittance + LPF + speed cap). The volunteer moves their own arm, the FR3 just goes along. Own-drive baseline (time / effort). | nothing special (no perception, no subject file) | nominal + stressed |
+| **`B_baseline_m2`** | 2 | yes | `smoothness`, `directness` | The reactive shared control of Ruiz-Ruiz et al. [1] **as-is**, without the two new factors. The **reference** the method is measured against (H1-H4: E vs B). | nothing special (no perception, no subject file) | nominal + stressed |
+| **`C_jointsafety_m3`** | 3 | yes | `smoothness`, `directness`, **`joint_safety`** | Ablation: baseline **+ only** the human joint-limit safety factor. Isolates that factor's individual contribution. | fresh `q_h` + `l1,l2` from the visuo-tactile pipeline; pre-registered joint ranges in `config/subjects/SXX.yaml` | stressed (ablation, optional) |
+| **`D_manip_m3`** | 3 | yes | `smoothness`, `directness`, **`manipulability`** | Ablation: baseline **+ only** the robot manipulability factor. Isolates its individual contribution. | FR3 Jacobian (default analytic -> only needs `q` from `franka_states`; **no perception**) | stressed (ablation, optional) |
+| **`E_extended_m4`** | 4 | yes | all four | **The proposed controller** (m=4). Compared against B in both placements. | everything: perception (`q_h`, `l1,l2`) + subject file + Jacobian | nominal + stressed |
+| **`F_impedance_aan`** | - | yes | *(separate node)* | Impedance-control **assist-as-needed baseline of Zhang et al. [9]**. Comparability anchor with prior model-based AAN work. Different controller: `baseline_aan.launch`. `K`, `D`, dead-band = **placeholders**, set them from [9]. | `franka_states` (no `q_h`, no Jacobian) | nominal only |
 
-An unknown `condition` aborts node startup with the valid list -- there
-is no silent default. Each cycle the requested factor set is
-intersected with what the sensors can support (fresh `q_h` for
-`joint_safety`, a fresh robot Jacobian for `manipulability`); a
-downgrade is logged (`logwarn`/`logerr`), never silent. If a condition
-that *requires* `manipulability` (D, E) starts with
-`~jacobian_source:=none` (or KDL failing to init), the node logs an
-error at startup.
+`smoothness` / `directness` are always on in any assisted condition
+(they define the reactive law of [1]); `joint_safety` and
+`manipulability` are the two factors this paper adds. Their smoothness /
+directness weights are identical across B/C/D/E -- only the active set
+changes.
+
+An unknown `condition` **aborts** node startup with the valid list --
+no silent default. Each cycle the requested factor set is intersected
+with what the sensors can support (fresh `q_h` for `joint_safety`, a
+fresh robot Jacobian for `manipulability`); a downgrade is logged
+(`logwarn` / `logerr`), never silent. A condition that *requires*
+`manipulability` (D, E) started with `~jacobian_source:=none` (or KDL
+failing to init) logs an error at startup.
+
+```bash
+roslaunch sc_ros_empathic shared_control.launch condition:=A_standalone
+roslaunch sc_ros_empathic shared_control.launch condition:=B_baseline_m2
+roslaunch sc_ros_empathic shared_control.launch condition:=C_jointsafety_m3 subject:=S01
+roslaunch sc_ros_empathic shared_control.launch condition:=D_manip_m3
+roslaunch sc_ros_empathic shared_control.launch condition:=E_extended_m4 subject:=S01
+roslaunch sc_ros_empathic baseline_aan.launch
+```
+
+Add `placement:=stressed path_center:="[x, y, z]"` for the stressed
+placement, and `record:=true trial_label:=S01_nominal_E` to log the
+bag. `A_standalone` only relays the human's force -- if nobody pushes
+the handle the robot stays still; use `B_baseline_m2` for a first
+"does the robot move" check (it needs no perception and drives the
+circle on its own).
 
 ## Circle placement (paper Sec. V-A)
 
