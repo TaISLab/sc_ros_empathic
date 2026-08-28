@@ -39,6 +39,7 @@ max_jacobian_age: 0.2     # s; topic mode: older -> factor dropped, warned
 #             to the nearest reference point; tracks the reference
 #             radius (not the [1] law).
 follower_mode: crosstrack
+path_direction: forward   # forward | reverse -- which way round the circle is traced
 Ka: 1.0                   # proportional gain, 1/s; was 2.0
 rho_min: 0.02            # pure-pursuit lookahead when on the path [m] (larger -> smaller traced circle)
 cruise_speed: 0.03       # tangential feed-forward around the circle [m/s]; 0 = proportional-only

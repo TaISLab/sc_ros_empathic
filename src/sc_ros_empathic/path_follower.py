@@ -85,12 +85,15 @@ class CirclePath:
 
 class ReactivePathFollower:
     def __init__(self, path, lam=1.02, rho_min=0.015, Ka=2.0, n_samples=360,
-                 cruise_speed=0.0, mode="lookahead"):
+                 cruise_speed=0.0, mode="lookahead", direction=1):
         self.path = path
         self.lam = lam
         self.rho_min = rho_min
         self.Ka = Ka
         self.n_samples = n_samples
+        # +1: advance in the direction of increasing s (the path's
+        # native parametrisation); -1: trace the circle the other way.
+        self.direction = 1 if int(direction) >= 0 else -1
         # Tangential feed-forward along the path (m/s). 0 -> the
         # verbatim proportional-only law; > 0 guarantees forward
         # progress on a tracing task even when the cross-track error
@@ -131,26 +134,29 @@ class ReactivePathFollower:
         rho = self.lam * d if d >= self.rho_min else self.rho_min
 
         n = len(s_grid)
-        fwd = (i_near + 1 + np.arange(n)) % n          # indices ahead, wrapping
+        # "ahead" is in the follower's chosen direction (+1: increasing
+        # s; -1: decreasing s), wrapping.
+        fwd = (i_near + self.direction * (1 + np.arange(n))) % n
         d_fwd = d_all[fwd]
         crossings = np.flatnonzero(d_fwd >= rho)
         best_i = int(fwd[crossings[0]]) if crossings.size else int(fwd[-1])
         best_s = float(s_grid[best_i])
 
         x_d = self.path.point(best_s)
-        tangent = self.path.tangent(best_s)
+        tangent = self.direction * self.path.tangent(best_s)   # travel heading
         return x_d, tangent, best_s
 
     def robot_command(self, x):
-        """Returns (v_r, tangent). See __init__ for the two modes."""
+        """Returns (v_r, travel_tangent). See __init__ for the two modes
+        and `direction` for the sense of travel."""
         x = np.asarray(x, dtype=float)
         if self.mode == "crosstrack":
             s_near = self.path.nearest_s(x, self.n_samples)
             p_near = self.path.point(s_near)
-            tangent = self.path.tangent(s_near)
+            tangent = self.direction * self.path.tangent(s_near)
             v_r = self.cruise_speed * tangent + self.Ka * (p_near - x)
             return v_r, tangent
-        x_d, tangent, _ = self.next_goal(x)
+        x_d, tangent, _ = self.next_goal(x)   # tangent already direction-signed
         v_r = self.cruise_speed * tangent + self.Ka * (x_d - x)
         return v_r, tangent
 

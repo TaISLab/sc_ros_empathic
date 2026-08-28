@@ -85,6 +85,8 @@
   <arg name="path_center" default="[0.45, 0.0, 0.45]"/>
   <arg name="path_radius" default="0.05"/>
   <arg name="path_normal" default="[0.0, 0.0, 1.0]"/>
+  <arg name="path_direction" default="forward"/>  <!-- forward | reverse -->
+
 
   <!-- Loop-tuning knobs, exposed so you can iterate without editing
        config/shared_control.yaml. Conservative starting values: raise
@@ -164,6 +166,7 @@
     <rosparam param="path_center" subst_value="true">$(arg path_center)</rosparam>
     <param name="path_radius" value="$(arg path_radius)"/>
     <rosparam param="path_normal" subst_value="true">$(arg path_normal)</rosparam>
+    <param name="path_direction" value="$(arg path_direction)"/>
     <param name="Ka" value="$(arg Ka)"/>
     <param name="rho_min" value="$(arg rho_min)"/>
     <param name="cruise_speed" value="$(arg cruise_speed)"/>

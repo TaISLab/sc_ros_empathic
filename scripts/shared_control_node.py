@@ -210,11 +210,19 @@ class SharedControlNode(object):
         # (cuts corners under loop lag -> traced circle smaller than the
         # reference).
         follower_mode = rospy.get_param('~follower_mode', 'crosstrack')
+        # 'forward' = trace the circle in the path's native sense;
+        # 'reverse' = the other way round.
+        pd = str(rospy.get_param('~path_direction', 'forward')).lower()
+        if pd not in ('forward', 'reverse'):
+            rospy.logwarn("shared_control_node: ~path_direction=%r, expected "
+                          "'forward' or 'reverse'; using 'forward'.", pd)
+        self.path_dir = -1 if pd == 'reverse' else 1
         self.path = CirclePath(center=center, radius=radius, normal=normal)
         self.follower = ReactivePathFollower(
             self.path, Ka=Ka, rho_min=rho_min, lam=lam,
-            cruise_speed=cruise_speed, mode=follower_mode)
-        self.lap_counter = LapCounter()
+            cruise_speed=cruise_speed, mode=follower_mode,
+            direction=self.path_dir)
+        self.lap_counter = LapCounter(direction=self.path_dir)
         # Trial ends after this many laps (0 = run until Ctrl-C). The
         # paper's trial is 4 loops, the first discarded as training.
         self.trial_laps = int(rospy.get_param('~trial_laps', 0))
@@ -819,7 +827,7 @@ class SharedControlNode(object):
                 v_r, tangent = self.follower.robot_command(self.x)
             else:
                 v_r = np.zeros(3)
-                tangent = self.path.tangent(s_near)
+                tangent = self.path_dir * self.path.tangent(s_near)
 
             # 3. Active factors: start from the CONDITION's factor set,
             #    then drop joint_safety if the human-arm state is

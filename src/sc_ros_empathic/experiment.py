@@ -130,8 +130,12 @@ class LapCounter(object):
         lc.total_progress       # lap + s, a continuous progress signal
     """
 
-    def __init__(self, wrap_threshold=0.5):
+    def __init__(self, wrap_threshold=0.5, direction=1):
         self.wrap_threshold = float(wrap_threshold)
+        # +1: laps completed with increasing s count up; -1: laps
+        # completed with decreasing s count up (so `lap` is always
+        # "net laps in the intended travel direction").
+        self.direction = 1 if int(direction) >= 0 else -1
         self.lap = 0
         self._s_prev = None
 
@@ -143,18 +147,21 @@ class LapCounter(object):
         s = float(s) % 1.0
         if self._s_prev is not None:
             delta = s - self._s_prev
-            if delta < -self.wrap_threshold:
-                self.lap += 1
-            elif delta > self.wrap_threshold:
-                self.lap -= 1
+            if delta < -self.wrap_threshold:        # wrapped 1 -> 0
+                self.lap += self.direction
+            elif delta > self.wrap_threshold:       # wrapped 0 -> 1
+                self.lap -= self.direction
         self._s_prev = s
         return self.lap
 
     @property
     def total_progress(self):
+        """lap + fraction of the current lap already travelled, so it
+        increases monotonically in the travel direction."""
         if self._s_prev is None:
             return float(self.lap)
-        return self.lap + self._s_prev
+        frac = self._s_prev if self.direction >= 0 else (1.0 - self._s_prev)
+        return self.lap + frac
 
 
 # ---------------------------------------------------------------------

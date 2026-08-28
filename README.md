@@ -111,6 +111,10 @@ frontal/vertical circle facing the participant, set e.g.
 `path_normal:="[1, 0, 0]"` -- the follower and the metrics are
 plane-agnostic.
 
+`path_direction:=forward` (default) | `reverse` picks which way round
+the circle is traced; the lap counter and `trial_laps` follow the
+chosen direction (laps completed the intended way count up).
+
 ## What RViz shows
 
 `rviz:=true` loads `rviz/shared_control.rviz` (Fixed Frame `fr3_link0`,
