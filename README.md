@@ -192,8 +192,10 @@ close the bag / CSV. Lap count comes from `~diag/path_progress[1]`
 ## Logging (CSV, no rosbag needed)
 
 `csv:=true` writes one row per control cycle to
-`~/sc_ros_empathic_logs/<condition>_<stamp>.csv` (override the dir with
-`csv_dir:=`, or give an exact file with `csv_path:=`). Columns:
+`~/sc_ros_empathic_logs/<label>_<YYYY-MM-DD-HH-MM-SS>.csv`, where
+`<label>` is `trial_label:=` if you pass it (so the CSV basename
+matches the rosbag's), else the condition id. Override the directory
+with `csv_dir:=`, or give an exact file with `csv_path:=`. Columns:
 `t, condition, lap, s_near, cross_track, px..pz, vh_*, vr_*, vs_*,
 fx..fz, eta_h, eta_r, eta_s, smoothness_h, directness_h,
 joint_safety_h, manip_h, m1..m4, m_min, w_qr` -- everything the

@@ -73,6 +73,7 @@ do not assume it silently matches the paper's per-cycle timing figures.
 
 import csv
 import os
+import time
 
 import numpy as np
 import rospy
@@ -474,15 +475,18 @@ class SharedControlNode(object):
         # Optional plain-CSV log (one row per control cycle) -- an
         # analysis-ready file that does not need the rosbag. ~csv_path
         # gives an explicit file; else ~csv_dir auto-names
-        # <condition>_<stamp>.csv; empty -> no CSV.
+        # <label>_<YYYY-MM-DD-HH-MM-SS>.csv, where <label> is
+        # ~trial_label if set (matching the rosbag basename), else the
+        # condition id. Empty ~csv_path and ~csv_dir -> no CSV.
         self.csv_fh = None
         self.csv_w = None
         csv_path = rospy.get_param('~csv_path', '')
         csv_dir = rospy.get_param('~csv_dir', '')
         if not csv_path and csv_dir:
+            label = rospy.get_param('~trial_label', '') or self.condition_id
             csv_path = os.path.join(
                 os.path.expanduser(csv_dir),
-                '%s_%d.csv' % (self.condition_id, int(rospy.Time.now().to_sec())))
+                '%s_%s.csv' % (label, time.strftime('%Y-%m-%d-%H-%M-%S')))
         if csv_path:
             csv_path = os.path.expanduser(csv_path)
             d = os.path.dirname(csv_path)

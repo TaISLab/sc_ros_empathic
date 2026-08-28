@@ -165,6 +165,7 @@
     <param name="cruise_speed" value="$(arg cruise_speed)"/>
     <param name="follower_mode" value="$(arg follower_mode)"/>
     <param name="trial_laps" value="$(arg trial_laps)"/>
+    <param name="trial_label" value="$(arg trial_label)"/>
     <param name="csv_dir" value="$(eval csv_dir if str(csv).lower() == 'true' else '')"/>
     <param name="v_max" value="$(arg v_max)"/>
     <param name="lpf_alpha" value="$(arg lpf_alpha)"/>
