@@ -192,12 +192,14 @@ close the bag / CSV. Lap count comes from `~diag/path_progress[1]`
 ## Logging (CSV, no rosbag needed)
 
 `csv:=true` writes one row per control cycle to
-`~/sc_ros_empathic_logs/<label>_<YYYY-MM-DD-HH-MM-SS>.csv`. `<label>`
-defaults to `<subject>_<condition>` when you pass `subject:=` (e.g.
-`S01_B_baseline_m2`), else just `<condition>`; `trial_label:=`
-overrides it. The rosbag (`record:=true`) uses the **same** basename in
-`~/sc_ros_empathic_bags/`. Override the CSV dir with `csv_dir:=`, or
-give an exact file with `csv_path:=`. Columns:
+`~/sc_ros_empathic_logs/<label>_<YYYY-MM-DD_HH-MM-SS>.csv` (e.g.
+`S01_E_extended_m4_2026-08-28_12-31-40.csv`). `<label>` defaults to
+`<subject>_<condition>` when you pass `subject:=`, else just
+`<condition>`; `trial_label:=` overrides it. The rosbag
+(`record:=true`) shares the `<label>` prefix in
+`~/sc_ros_empathic_bags/` (its timestamp is rosbag's own all-dashes
+format). Override the CSV dir with `csv_dir:=`, or give an exact file
+with `csv_path:=`. Columns:
 `t` (epoch s), `t_rel` (s from the first row), `wall_time`
 (`YYYY-MM-DD HH:MM:SS.mmm`), `condition, lap, s_near, cross_track,
 px..pz, vh_*, vr_*, vs_*, fx..fz, eta_h, eta_r, eta_s, smoothness_h,
