@@ -30,6 +30,8 @@ Nothing here changes the control law. It only provides:
     without reaching into the factor's internals.
 """
 
+import math
+
 import numpy as np
 
 from .performance import DEFAULT_JOINT_LIMITS
@@ -111,57 +113,54 @@ def resolve_condition(condition_id):
 # ---------------------------------------------------------------------
 
 class LapCounter(object):
-    """Accumulate an integer lap index from the closed-path parameter
-    s in [0, 1) reported each control cycle.
+    """Turn the closed-path parameter s in [0, 1) reported each control
+    cycle into a continuous progress signal and a completed-lap count.
 
-    The circle-tracing task is a closed path, so s wraps 1 -> 0 once
-    per completed loop. A forward wrap (s jumps down by more than
-    `wrap_threshold`, e.g. 0.98 -> 0.03) increments the lap; a backward
-    wrap increments it back down, so brief reversals near the seam do
-    not inflate the count. Small forward/backward jitter that does not
-    cross the seam never changes the lap.
+    Each cycle the shortest signed step in s is accumulated (wrapping
+    across the 1->0 seam), so the running total is the net distance
+    travelled along the path in laps. `total_progress` is that total in
+    the intended travel direction (>= 0, monotone up while the EE keeps
+    going that way); `lap` is floor(total_progress) = laps completed.
 
-    Usage:
-        lc = LapCounter()
-        lc.update(s)            # every cycle
-        lc.lap                  # 0 during the first loop, 1 during the
-                                # second, ... -> offline analysis keeps
-                                # laps >= 1 (lap 0 is the training loop)
-        lc.total_progress       # lap + s, a continuous progress signal
+    Accumulating the signed step (rather than counting >0.5 jumps at the
+    seam) makes it robust to jitter and to slow / partial motion near
+    the seam: a small back-and-forth just adds and subtracts a small
+    step, never a spurious +/-1 lap.
     """
 
     def __init__(self, wrap_threshold=0.5, direction=1):
         self.wrap_threshold = float(wrap_threshold)
-        # +1: laps completed with increasing s count up; -1: laps
-        # completed with decreasing s count up (so `lap` is always
-        # "net laps in the intended travel direction").
+        # +1: travel is in the direction of increasing s; -1: decreasing.
         self.direction = 1 if int(direction) >= 0 else -1
-        self.lap = 0
+        self._total = 0.0          # signed accumulated progress, native s sense
         self._s_prev = None
 
     def reset(self):
-        self.lap = 0
+        self._total = 0.0
         self._s_prev = None
 
     def update(self, s):
         s = float(s) % 1.0
         if self._s_prev is not None:
-            delta = s - self._s_prev
-            if delta < -self.wrap_threshold:        # wrapped 1 -> 0
-                self.lap += self.direction
-            elif delta > self.wrap_threshold:       # wrapped 0 -> 1
-                self.lap -= self.direction
+            d = s - self._s_prev
+            if d > self.wrap_threshold:
+                d -= 1.0
+            elif d < -self.wrap_threshold:
+                d += 1.0
+            self._total += d
         self._s_prev = s
         return self.lap
 
     @property
     def total_progress(self):
-        """lap + fraction of the current lap already travelled, so it
-        increases monotonically in the travel direction."""
-        if self._s_prev is None:
-            return float(self.lap)
-        frac = self._s_prev if self.direction >= 0 else (1.0 - self._s_prev)
-        return self.lap + frac
+        """Net progress in the travel direction, in laps (>= 0,
+        monotone up while travelling that way)."""
+        return self.direction * self._total
+
+    @property
+    def lap(self):
+        """Completed laps in the travel direction."""
+        return int(math.floor(self.total_progress + 1e-9))
 
 
 # ---------------------------------------------------------------------

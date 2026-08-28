@@ -46,8 +46,11 @@ cruise_speed: 0.03       # tangential feed-forward around the circle [m/s]; 0 = 
 lam: 1.02
 
 # Trial length: end after this many laps (0 = until Ctrl-C). Paper's
-# trial = 4 loops, first discarded as training.
+# trial = 4 loops, first discarded as training. trial_end: 'shutdown'
+# (node exits -> whole launch comes down, bag/CSV closed) or 'hold'
+# (node stays at zero velocity, operator ends the session).
 trial_laps: 0
+trial_end: shutdown
 
 # --- Admittance model (force -> human-intent velocity v_h) ---------
 admittance_mass:    [2.0, 2.0, 2.0]     # M_h, per Cartesian axis (larger = more sluggish)

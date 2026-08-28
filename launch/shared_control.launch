@@ -113,10 +113,13 @@
   <arg name="config" default="$(find sc_ros_empathic)/config/shared_control.yaml"/>
 
   <!-- Trial ends after this many laps (0 = run until Ctrl-C). The
-       paper's trial is 4 loops (first = training). At the end the node
-       holds zero velocity and latches ~diag/trial_done=true; Ctrl-C to
-       close the bag/CSV. -->
+       paper's trial is 4 loops (first = training).
+       trial_end := shutdown (default) -> the node exits and, because it
+       is required="true", roslaunch tears the whole launch down (RViz +
+       rosbag), closing the bag/CSV cleanly. 'hold' -> the node stays
+       alive at zero velocity and you Ctrl-C when ready. -->
   <arg name="trial_laps" default="0"/>
+  <arg name="trial_end"  default="shutdown"/>
 
   <!-- Bag / CSV basename: <subject>_<condition> when subject:= is
        given, else just <condition>. Both the rosbag ('-o') and the CSV
@@ -149,12 +152,15 @@
   </include>
 
   <!-- ================= shared control ================= -->
+  <!-- required: its exit (Ctrl-C, crash, or trial_end:=shutdown after
+       trial_laps) brings down RViz + the rosbag too. -->
   <node pkg="sc_ros_empathic" type="shared_control_node.py"
-        name="shared_control_node" output="screen">
+        name="shared_control_node" output="screen" required="true">
     <!-- Gains/weights first, so explicit params below win over the file. -->
     <rosparam command="load" file="$(arg config)"/>
 
     <param name="condition" value="$(arg condition)"/>
+    <param name="trial_end" value="$(arg trial_end)"/>
     <param name="subject_file" value="$(arg subject_file)"/>
     <param name="base_link" value="$(arg base_link)"/>
     <param name="ee_link"   value="$(arg ee_link)"/>

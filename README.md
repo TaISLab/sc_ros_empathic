@@ -185,13 +185,26 @@ none is available. `q_h` always needs the live topic.
 
 ## Trial length
 
-By default the node **runs until Ctrl-C** -- there is no automatic
-stop. Set `trial_laps:=N` to end after N completed laps (the paper's
-trial is 4 loops, the first discarded as training). At the end the node
-holds zero velocity, logs "trial complete", and latches
-`~diag/trial_done = true`; you still Ctrl-C the launch to stop RViz and
-close the bag / CSV. Lap count comes from `~diag/path_progress[1]`
-(and `[2] = lap + s`, a continuous progress signal).
+`trial_laps:=0` (default) runs until Ctrl-C. `trial_laps:=N` ends the
+trial after N completed laps (the paper's trial is 4 loops, the first
+discarded as training). At the end the node latches
+`~diag/trial_done = true`, publishes ~0.5 s of zero velocity so the
+robot stops, then:
+
+- `trial_end:=shutdown` (default) -- the node exits; because it is
+  `required="true"` in the launch, RViz and the rosbag come down too
+  and the bag / CSV are closed cleanly. **The launch terminates on its
+  own.**
+- `trial_end:=hold` -- the node stays alive at zero velocity; you
+  Ctrl-C when ready.
+
+Lap counting (`experiment.LapCounter`) accumulates the signed step in
+`s` each cycle rather than counting seam jumps, so it is robust to
+jitter and to slow motion near the seam. `~diag/path_progress` is
+`[s_near, completed_laps, continuous_progress_in_laps, cross_track_m]`
+-- if `continuous_progress` is not climbing while the robot visibly
+moves, the traced path is not actually sweeping the full circle (check
+`s_near` spans `0..1`, not a sub-arc).
 
 ## Logging (CSV, no rosbag needed)
 
@@ -354,6 +367,7 @@ Pass as `arg:=value`. Anything not listed lives in
 | `subject` | *(empty)* | volunteer id -> loads `config/subjects/<subject>.yaml` (id, demographics, arm lengths, joint ranges). Empty -> plain params. |
 | `placement` | `nominal` | label only (logging / file naming); geometry is `path_*`. |
 | `trial_laps` | `0` | end after N laps (0 = until Ctrl-C). Paper's trial = 4. |
+| `trial_end` | `shutdown` | at `trial_laps`: `shutdown` (node exits -> whole launch down, bag/CSV closed) \| `hold` (stay at zero velocity). |
 
 ### Circle geometry
 

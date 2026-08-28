@@ -225,8 +225,14 @@ class SharedControlNode(object):
         self.lap_counter = LapCounter(direction=self.path_dir)
         # Trial ends after this many laps (0 = run until Ctrl-C). The
         # paper's trial is 4 loops, the first discarded as training.
+        # ~trial_end = 'shutdown' (default): stop the node (with
+        # required="true" in the launch this tears the whole launch
+        # down and closes the bag/CSV); 'hold': keep the node alive at
+        # zero velocity, operator ends the session.
         self.trial_laps = int(rospy.get_param('~trial_laps', 0))
+        self.trial_end = str(rospy.get_param('~trial_end', 'shutdown')).lower()
         self._trial_done = False
+        self._trial_done_t = None
 
         # ------------------------------------------------------------
         # Admittance model for v_h (force -> human-intent velocity).
@@ -715,9 +721,12 @@ class SharedControlNode(object):
         self.diag['factors_r'].publish(
             Float64MultiArray(data=_factors_to_array(factors_r)))
 
+        # [s_near, completed laps, continuous progress (laps, monotone
+        #  in the travel direction), cross-track error m]
         self.diag['path_progress'].publish(Float64MultiArray(
             data=[float(s_near), float(lap),
-                  float(lap) + float(s_near), float(cross_track)]))
+                  float(self.lap_counter.total_progress),
+                  float(cross_track)]))
 
         if human_fresh and self.q_h is not None:
             margins, min_margin = joint_margins(self.q_h,
@@ -817,11 +826,20 @@ class SharedControlNode(object):
             if (self.trial_laps > 0 and lap >= self.trial_laps
                     and not self._trial_done):
                 self._trial_done = True
+                self._trial_done_t = rospy.Time.now()
                 self.diag['trial_done'].publish(Bool(data=True))
-                rospy.loginfo('shared_control_node: trial complete (%d laps '
-                              'done). Holding zero velocity -- Ctrl-C to end '
-                              'the session and close the bag/CSV.',
-                              self.trial_laps)
+                rospy.loginfo('shared_control_node: trial complete (%d laps). '
+                              '%s', self.trial_laps,
+                              'shutting down.' if self.trial_end == 'shutdown'
+                              else 'holding zero velocity -- Ctrl-C to end.')
+
+            if (self._trial_done and self.trial_end == 'shutdown'
+                    and (rospy.Time.now() - self._trial_done_t).to_sec() > 0.5):
+                # published ~0.5 s of zero commands -> the robot is
+                # stopped; now exit (required="true" brings down rviz +
+                # rosbag too, closing the bag/CSV cleanly).
+                rospy.signal_shutdown('trial complete')
+                break
 
             if self.cond_use_robot:
                 v_r, tangent = self.follower.robot_command(self.x)
