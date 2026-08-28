@@ -15,6 +15,13 @@ Minimal RViz visualization for the shared-control experiment:
     swept (LINE_STRIP, last ~trail_len points), updated from
     franka_states' O_T_EE -- this is the "trajectory followed" overlay.
     Disable the trail with ~trail_len:=0.
+  * v_h / v_r / v_s as ARROW markers rooted at the EE (from
+    shared_control_node's ~diag/v_* topics), scaled by ~vel_arrow_gain
+    metres per m/s. Colours: v_h green, v_r blue, v_s red.
+    Disable with ~show_vel_arrows:=false.
+  * eta_h / eta_r / eta_s as a floating TEXT marker above the EE (from
+    ~eta). Disable with ~show_eta_text:=false. For a time plot use
+    rqt_plot, not RViz.
 
 Publishes a single visualization_msgs/MarkerArray to ~viz_topic
 (default /sc_ros_empathic/viz -- an ABSOLUTE name so it does not depend
@@ -26,8 +33,8 @@ topic.
 import numpy as np
 import rospy
 from franka_msgs.msg import FrankaState
-from geometry_msgs.msg import Point
-from std_msgs.msg import ColorRGBA, Header
+from geometry_msgs.msg import Point, Vector3Stamped
+from std_msgs.msg import ColorRGBA, Float64MultiArray, Header
 from visualization_msgs.msg import Marker, MarkerArray
 
 from sc_ros_empathic.path_follower import CirclePath
@@ -58,11 +65,25 @@ class RvizVisualizationNode(object):
         self.trail_step = float(rospy.get_param('~trail_step', 0.002))  # m
         self.trail = []
 
+        # v_h / v_r / v_s arrows + eta text, from shared_control_node.
+        self.show_vel_arrows = bool(rospy.get_param('~show_vel_arrows', True))
+        self.show_eta_text = bool(rospy.get_param('~show_eta_text', True))
+        self.vel_arrow_gain = float(rospy.get_param('~vel_arrow_gain', 2.0))
+        sc = rospy.get_param('~sc_node', '/shared_control_node')
+        self._v = {'v_h': None, 'v_r': None, 'v_s': None}
+        self._eta = None
+
         self.x_actual = None
 
         self.viz_pub = rospy.Publisher(self.viz_topic, MarkerArray, queue_size=1)
         rospy.Subscriber(self.franka_states_topic, FrankaState,
                           self._franka_state_cb, queue_size=1)
+        if self.show_vel_arrows:
+            rospy.Subscriber(sc + '/diag/v_h', Vector3Stamped, self._vh_cb, queue_size=1)
+            rospy.Subscriber(sc + '/diag/v_r', Vector3Stamped, self._vr_cb, queue_size=1)
+            rospy.Subscriber(sc + '/diag/v_s', Vector3Stamped, self._vs_cb, queue_size=1)
+        if self.show_eta_text:
+            rospy.Subscriber(sc + '/eta', Float64MultiArray, self._eta_cb, queue_size=1)
 
         # The path itself is static: republish it at a slow rate so a
         # late-joining RViz instance still picks it up without needing
@@ -81,6 +102,18 @@ class RvizVisualizationNode(object):
             if len(self.trail) > self.trail_len:
                 self.trail.pop(0)
         self._publish_ee_marker()
+
+    def _vh_cb(self, m):
+        self._v['v_h'] = m.vector
+
+    def _vr_cb(self, m):
+        self._v['v_r'] = m.vector
+
+    def _vs_cb(self, m):
+        self._v['v_s'] = m.vector
+
+    def _eta_cb(self, m):
+        self._eta = list(m.data)
 
     def _header(self):
         h = Header()
@@ -162,7 +195,66 @@ class RvizVisualizationNode(object):
                                       z=float(p[2])))
             array.markers.append(t)
 
+        if self.show_vel_arrows:
+            x = self.x_actual
+            for mid, key, rgba in ((10, 'v_h', (0.0, 0.85, 0.0, 1.0)),
+                                   (11, 'v_r', (0.2, 0.45, 1.0, 1.0)),
+                                   (12, 'v_s', (1.0, 0.0, 0.0, 1.0))):
+                a = self._arrow_marker(mid, x, self._v[key], rgba)
+                if a is not None:
+                    array.markers.append(a)
+
+        if self.show_eta_text:
+            array.markers.append(self._eta_text_marker(self.x_actual))
+
         self.viz_pub.publish(array)
+
+    def _arrow_marker(self, mid, origin, vec, rgba):
+        a = Marker()
+        a.header = self._header()
+        a.ns = 'sc_ros_empathic'
+        a.id = mid
+        a.type = Marker.ARROW
+        if vec is None:
+            a.action = Marker.DELETE
+            return a
+        g = self.vel_arrow_gain
+        tip = (origin[0] + vec.x * g, origin[1] + vec.y * g,
+               origin[2] + vec.z * g)
+        if (tip[0] - origin[0]) ** 2 + (tip[1] - origin[1]) ** 2 \
+                + (tip[2] - origin[2]) ** 2 < 1e-8:
+            a.action = Marker.DELETE
+            return a
+        a.action = Marker.ADD
+        a.pose.orientation.w = 1.0
+        a.points = [Point(x=float(origin[0]), y=float(origin[1]),
+                          z=float(origin[2])),
+                    Point(x=float(tip[0]), y=float(tip[1]), z=float(tip[2]))]
+        a.scale.x = 0.006   # shaft diameter
+        a.scale.y = 0.013   # head diameter
+        a.scale.z = 0.02    # head length
+        a.color = ColorRGBA(*rgba)
+        return a
+
+    def _eta_text_marker(self, origin):
+        m = Marker()
+        m.header = self._header()
+        m.ns = 'sc_ros_empathic'
+        m.id = 20
+        m.type = Marker.TEXT_VIEW_FACING
+        m.action = Marker.ADD
+        m.pose.position.x = float(origin[0])
+        m.pose.position.y = float(origin[1])
+        m.pose.position.z = float(origin[2]) + 0.09
+        m.pose.orientation.w = 1.0
+        m.scale.z = 0.03    # text height, m
+        m.color = ColorRGBA(1.0, 1.0, 1.0, 1.0)
+        e = self._eta
+        if e is not None and len(e) >= 3:
+            m.text = 'eta_h %.2f   eta_r %.2f   eta_s %.2f' % (e[0], e[1], e[2])
+        else:
+            m.text = 'eta: (waiting for /eta)'
+        return m
 
 
 if __name__ == '__main__':

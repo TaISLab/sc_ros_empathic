@@ -111,12 +111,27 @@ frontal/vertical circle facing the participant, set e.g.
 `path_normal:="[1, 0, 0]"` -- the follower and the metrics are
 plane-agnostic.
 
-RViz shows the circle **outline** plus a translucent **disc** filling
-it, so the plane and its tilt are unambiguous (a bare ellipse outline
-gives no depth cue); the red sphere is the live end-effector. Disable
-the disc with `show_plane:=false`. `rviz:=true` loads
-`rviz/shared_control.rviz` (Fixed Frame `fr3_link0`, MarkerArray on
-`/sc_ros_empathic/viz`).
+## What RViz shows
+
+`rviz:=true` loads `rviz/shared_control.rviz` (Fixed Frame `fr3_link0`,
+one MarkerArray display on `/sc_ros_empathic/viz`). In that array:
+
+| element | marker | meaning |
+|---|---|---|
+| blue outline + translucent disc | LINE_STRIP + TRIANGLE_LIST | the circle to trace and the plane it lies in (`show_plane:=false` hides the disc) |
+| red sphere | SPHERE | live end-effector position |
+| amber line | LINE_STRIP | trajectory actually followed (EE trail; `trail_len:=0` disables) |
+| **green / blue / red arrows** at the EE | ARROW | **`v_h` / `v_r` / `v_s`**, length = `vel_arrow_gain` m per m/s (`show_vel_arrows:=false` hides them) |
+| white text above the EE | TEXT_VIEW_FACING | **`eta_h` / `eta_r` / `eta_s`** live values (`show_eta_text:=false` hides it) |
+
+RViz cannot plot a scalar over time -- for the **efficiency / factor
+time series** use `rqt_plot`:
+
+```bash
+rqt_plot /shared_control_node/eta/data[0]:data[1]:data[2]
+rqt_plot /shared_control_node/diag/factors_h/data[0]:data[1]:data[2]:data[3]
+rqt_plot /shared_control_node/diag/v_s/vector/x:y:z
+```
 
 ## Per-volunteer configuration
 
