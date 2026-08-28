@@ -100,12 +100,16 @@
   <arg name="trial_label" default="trial"/>
   <arg name="bag_dir"     default="$(env HOME)/sc_ros_empathic_bags"/>
 
-  <!-- ================= robot bring-up ================= -->
-  <!-- Same external Cartesian velocity controller already used
-       elsewhere in this lab's FR3 setup. Placed first so the
-       controller is up before shared_control_node starts publishing
-       velocity commands. -->
-  <include file="$(find taislab_franka_controllers)/launch/cartesian_velocity_external_controller.launch">
+  <!-- ================= robot bring-up (OPT-IN) ================= -->
+  <!-- OFF by default: in this lab the FR3 bring-up + the external
+       Cartesian velocity controller are launched separately (e.g. from
+       the perception/control PC). This node only needs
+       franka_state_controller and a controller listening on
+       ~cmd_topic to be already up. Set robot_bringup:=true only on a
+       standalone setup where nothing else starts them. -->
+  <arg name="robot_bringup" default="false"/>
+  <include if="$(arg robot_bringup)"
+           file="$(find taislab_franka_controllers)/launch/cartesian_velocity_external_controller.launch">
     <arg name="robot_ip"     value="$(arg robot_ip)"/>
     <arg name="load_gripper" value="false"/>
   </include>
