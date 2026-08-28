@@ -13,6 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   sensor_msgs
   std_msgs
+  std_srvs
   franka_msgs
   visualization_msgs
 )
@@ -108,7 +109,7 @@ catkin_python_setup()
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
   CATKIN_DEPENDS roscpp rospy geometry_msgs sensor_msgs std_msgs
-                 franka_msgs visualization_msgs
+                 std_srvs franka_msgs visualization_msgs
 )
 
 ###########

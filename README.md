@@ -286,3 +286,33 @@ Condition F (impedance-AAN baseline, separate node):
 ```bash
 roslaunch sc_ros_empathic baseline_aan.launch record:=true trial_label:=P03_nominal_F
 ```
+
+## Troubleshooting
+
+**Robot drifts / limit-cycles when you let go (won't trace the
+circle).** `O_F_ext_hat_K` is not zero at rest -- an EE payload / handle
+not in the FR3 load model leaves a roughly constant offset (mostly
+`-z`), the admittance turns it into a steady spurious `v_h`, and the
+path follower fights it. The node now **tares** the wrench over
+`~force_tare_s` (default 1 s) at startup -- *keep hands off the robot
+during that second*; it logs the measured bias. If the bias is large,
+set the FR3 EE load so `O_F_ext_hat_K` reads ~0 at rest, and/or raise
+`force_deadzone_N:=3` (needs more push to drive). Re-tare mid-session
+with `rosservice call /shared_control_node/tare`. Check the residual
+with `rostopic echo /shared_control_node/diag/force` and
+`/shared_control_node/diag/v_h` (both ~0 with nobody touching).
+
+**RViz shows only TF axes, no circle / EE / path.** The viz node
+publishes on `/sc_ros_empathic/viz` (absolute); `rviz/shared_control.rviz`
+points there. If you added the display by hand, set its Marker Topic to
+`/sc_ros_empathic/viz` and Fixed Frame to `fr3_link0`. The **yellow
+line** is the trajectory actually followed (EE trail, last `~trail_len`
+points; `~trail_len:=0` disables it).
+
+**Robot doesn't move at all.** `rostopic hz /robot_vel_ctrl/vel_cmd`
+(published?), `rostopic info` on it (does the C++ controller subscribe?),
+`rosservice call /controller_manager/list_controllers` (is
+`cartesian_velocity_external_controller` running?), and check
+`$ROS_MASTER_URI` points at the machine running `franka_control`.
+`A_standalone` only relays human force -- use `B_baseline_m2` for a
+first motion check.

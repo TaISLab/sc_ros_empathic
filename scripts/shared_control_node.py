@@ -77,6 +77,7 @@ from franka_msgs.msg import FrankaState
 from geometry_msgs.msg import Pose, PoseArray, TwistStamped, Vector3Stamped
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64, Float64MultiArray, String
+from std_srvs.srv import Empty, EmptyResponse
 
 from sc_ros_empathic.shared_control_core import SharedControlCore
 from sc_ros_empathic.robot_model import RobotModel
@@ -208,6 +209,20 @@ class SharedControlNode(object):
         self.alpha_f = rospy.get_param('~force_lpf_alpha', 0.1)
         self.v_h = np.zeros(3)
         self.f_filtered = np.zeros(3)
+
+        # O_F_ext_hat_K is rarely exactly zero at rest (an EE payload /
+        # handle not in the FR3 load model leaves a roughly constant
+        # offset, mostly -z in the base frame). Un-taured, the admittance
+        # turns it into a steady spurious v_h and the robot drifts /
+        # limit-cycles against the path follower. Average the wrench for
+        # ~force_tare_s at startup (HANDS OFF) and subtract it; 0 or a
+        # negative value disables the tare. ~tare (std_srvs/Empty)
+        # re-runs it mid-session.
+        self.force_tare_s = float(rospy.get_param('~force_tare_s', 1.0))
+        self.f_bias = np.zeros(3)
+        self._tare_samples = []
+        self._tare_t0 = None
+        self._tared = self.force_tare_s <= 0.0
 
         # ------------------------------------------------------------
         # Shared-control law. Weight/gain defaults below are the ones
@@ -429,6 +444,8 @@ class SharedControlNode(object):
             String(data=','.join(FACTOR_SLOTS)))
         self.diag['arm_points_layout'].publish(String(data='shoulder,elbow,wrist'))
 
+        rospy.Service('~tare', Empty, self._tare_srv)
+
         rospy.Subscriber(self.franka_states_topic, FrankaState,
                           self._franka_state_cb, queue_size=1)
         rospy.Subscriber(self.human_joint_state_topic, JointState,
@@ -455,13 +472,41 @@ class SharedControlNode(object):
         # base frame, from the FR3's joint-torque sensors + dynamic
         # model (NOT from the compliant gripper -- see paper Sec. 4.1).
         f_ext = -np.array(msg.O_F_ext_hat_K[0:3])
-        self._update_force(f_ext)
+
+        if not self._tared:
+            now = rospy.Time.now()
+            if self._tare_t0 is None:
+                self._tare_t0 = now
+                rospy.logwarn('shared_control_node: taring the external-force '
+                              'estimate for %.1f s -- HANDS OFF the robot.',
+                              self.force_tare_s)
+            self._tare_samples.append(f_ext)
+            if (now - self._tare_t0).to_sec() >= self.force_tare_s:
+                self.f_bias = np.mean(self._tare_samples, axis=0)
+                self._tared = True
+                self._tare_samples = []
+                rospy.loginfo('shared_control_node: force bias = [%.2f %.2f '
+                              '%.2f] N (|b|=%.2f). If large, set the FR3 EE '
+                              'load so O_F_ext_hat_K reads ~0 at rest.',
+                              self.f_bias[0], self.f_bias[1], self.f_bias[2],
+                              float(np.linalg.norm(self.f_bias)))
+        else:
+            self._update_force(f_ext - self.f_bias)
 
         # O_T_EE is a 4x4 pose stored column-major; translation is
         # indices 12, 13, 14.
         self.x = np.array([msg.O_T_EE[12], msg.O_T_EE[13], msg.O_T_EE[14]])
         self.q_robot = np.array(msg.q)
         self.have_robot_state = True
+
+    def _tare_srv(self, _req):
+        """std_srvs/Empty: re-run the startup force tare."""
+        self.f_bias = np.zeros(3)
+        self._tare_samples = []
+        self._tare_t0 = None
+        self._tared = False
+        rospy.logwarn('shared_control_node: re-taring on request.')
+        return EmptyResponse()
 
     def _human_joint_state_cb(self, msg):
         if len(msg.position) < 4:
@@ -631,7 +676,9 @@ class SharedControlNode(object):
         warned_stale_jacobian = False
 
         while not rospy.is_shutdown():
-            if not self.have_robot_state:
+            if not self.have_robot_state or not self._tared:
+                # No command published until the force tare has finished
+                # (robot must not drift on an un-taured wrench).
                 rate.sleep()
                 continue
 
