@@ -2,34 +2,58 @@
 <!--
   baseline_aan.launch  -  experimental condition F (paper Sec. V-B):
   impedance-control assist-as-needed baseline of Zhang et al. [9],
-  nominal placement only.
+  NOMINAL placement only.
 
-      roslaunch sc_ros_empathic baseline_aan.launch record:=true trial_label:=P03_nominal_F
+      roslaunch sc_ros_empathic baseline_aan.launch subject:=S01 record:=true csv:=true trial_laps:=4
 
-  See scripts/baseline_aan_node.py's docstring: the impedance / AAN
-  parameters below are PLACEHOLDERS and must be set to match [9] and
-  pre-registered before this is used for a published condition-F result.
+  The impedance / AAN parameters (impedance_stiffness, impedance_damping,
+  assist_admittance_gain, deadband_m, assist_ramp) are PLACEHOLDERS and
+  must be set to match [9] and pre-registered before this is used for a
+  published condition-F result. See scripts/baseline_aan_node.py.
 -->
 <launch>
-  <arg name="robot_ip" default="172.16.0.2"/>
+  <arg name="robot_ip"  default="172.16.0.2"/>
   <arg name="base_link" default="fr3_link0"/>
 
-  <arg name="path_center" default="[0.45, 0.0, 0.45]"/>
-  <arg name="path_radius" default="0.05"/>
-  <arg name="path_normal" default="[0.0, 0.0, 1.0]"/>
+  <arg name="subject" default=""/>
+  <arg name="trial_label" default="$(eval (subject + '_F_impedance_aan') if subject else 'F_impedance_aan')"/>
 
-  <arg name="rate_hz"     default="200.0"/>
+  <!-- geometry (nominal placement) -->
+  <arg name="path_center"    default="[0.45, 0.0, 0.45]"/>
+  <arg name="path_radius"    default="0.05"/>
+  <arg name="path_normal"    default="[0.0, 0.0, 1.0]"/>
+  <arg name="path_direction" default="forward"/>   <!-- forward | reverse -->
+
+  <!-- impedance-AAN law (PLACEHOLDERS, set from [9]) -->
+  <arg name="impedance_stiffness"     default="300.0"/>
+  <arg name="impedance_damping"       default="40.0"/>
+  <arg name="assist_admittance_gain" default="0.002"/>
+  <arg name="deadband_m"             default="0.01"/>
+  <arg name="assist_ramp"            default="1.0"/>
+
+  <!-- human admittance + output shaping (match the main node) -->
+  <arg name="admittance_mass"    default="[2.0, 2.0, 2.0]"/>
+  <arg name="admittance_damping" default="[40.0, 40.0, 40.0]"/>
+  <arg name="force_deadzone_N"   default="2.0"/>
+  <arg name="force_tare_s"       default="1.0"/>
+  <arg name="v_max"              default="0.08"/>
+  <arg name="lpf_alpha"          default="0.15"/>
+  <arg name="rate_hz"            default="200.0"/>
+
+  <!-- trial end -->
+  <arg name="trial_laps" default="0"/>
+  <arg name="trial_end"  default="shutdown"/>
+
+  <!-- logging / viz -->
+  <arg name="record"   default="false"/>
+  <arg name="bag_dir"  default="$(env HOME)/sc_ros_empathic_bags"/>
+  <arg name="csv"      default="false"/>
+  <arg name="csv_dir"  default="$(env HOME)/sc_ros_empathic_logs"/>
+  <arg name="csv_path" default=""/>
   <arg name="rviz"        default="true"/>
   <arg name="show_plane"  default="true"/>
   <arg name="rviz_config" default="$(find sc_ros_empathic)/rviz/shared_control.rviz"/>
-
-  <!-- shoulder/elbow/wrist points from the pipeline; recorded raw
-       (this node computes no FK). -->
   <arg name="human_arm_points_topic" default="/right_arm/arm_points"/>
-
-  <arg name="record"      default="false"/>
-  <arg name="trial_label" default="trial_F"/>
-  <arg name="bag_dir"     default="$(env HOME)/sc_ros_empathic_bags"/>
 
   <!-- OFF by default; the FR3 + velocity controller are brought up
        separately in this lab (see shared_control.launch). -->
@@ -40,13 +64,34 @@
     <arg name="load_gripper" value="false"/>
   </include>
 
+  <!-- Named 'shared_control_node' so its ~diag/* and ~tare land under
+       the same namespace as the other conditions -> one analysis path.
+       required: its exit (Ctrl-C, crash, trial_end:=shutdown) brings
+       RViz + the rosbag down too. -->
   <node pkg="sc_ros_empathic" type="baseline_aan_node.py"
-        name="shared_control_node" output="screen">
+        name="shared_control_node" output="screen" required="true">
     <param name="base_frame" value="$(arg base_link)"/>
     <rosparam param="path_center" subst_value="true">$(arg path_center)</rosparam>
-    <param name="path_radius" value="$(arg path_radius)"/>
+    <param name="path_radius"    value="$(arg path_radius)"/>
     <rosparam param="path_normal" subst_value="true">$(arg path_normal)</rosparam>
-    <param name="rate_hz" value="$(arg rate_hz)"/>
+    <param name="path_direction" value="$(arg path_direction)"/>
+    <param name="impedance_stiffness"     value="$(arg impedance_stiffness)"/>
+    <param name="impedance_damping"       value="$(arg impedance_damping)"/>
+    <param name="assist_admittance_gain" value="$(arg assist_admittance_gain)"/>
+    <param name="deadband_m"             value="$(arg deadband_m)"/>
+    <param name="assist_ramp"            value="$(arg assist_ramp)"/>
+    <rosparam param="admittance_mass" subst_value="true">$(arg admittance_mass)</rosparam>
+    <rosparam param="admittance_damping" subst_value="true">$(arg admittance_damping)</rosparam>
+    <param name="force_deadzone_N" value="$(arg force_deadzone_N)"/>
+    <param name="force_tare_s"     value="$(arg force_tare_s)"/>
+    <param name="v_max"     value="$(arg v_max)"/>
+    <param name="lpf_alpha" value="$(arg lpf_alpha)"/>
+    <param name="rate_hz"   value="$(arg rate_hz)"/>
+    <param name="trial_laps" value="$(arg trial_laps)"/>
+    <param name="trial_end"  value="$(arg trial_end)"/>
+    <param name="trial_label" value="$(arg trial_label)"/>
+    <param name="csv_dir"  value="$(eval csv_dir if str(csv).lower() == 'true' else '')"/>
+    <param name="csv_path" value="$(arg csv_path)"/>
   </node>
 
   <node pkg="sc_ros_empathic" type="rviz_visualization_node.py"
@@ -56,14 +101,12 @@
     <param name="path_radius" value="$(arg path_radius)"/>
     <rosparam param="path_normal" subst_value="true">$(arg path_normal)</rosparam>
     <param name="show_plane" value="$(arg show_plane)"/>
+    <param name="sc_node" value="/shared_control_node"/>
   </node>
 
   <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz"
         args="-d $(arg rviz_config)"/>
 
-  <!-- OFF by default; record:=true starts it. '-o' timestamps the bag
-       name so re-runs never overwrite. Condition F computes no
-       eta/factors/joint_margins/manipulability, so those are absent. -->
   <node if="$(arg record)" pkg="rosbag" type="record" name="trial_recorder"
         output="screen"
         args="-o $(arg bag_dir)/$(arg trial_label)
@@ -71,6 +114,7 @@
               $(arg human_arm_points_topic)
               /robot_vel_ctrl/vel_cmd
               /shared_control_node/diag/condition
+              /shared_control_node/diag/trial_done
               /shared_control_node/diag/v_h
               /shared_control_node/diag/v_r
               /shared_control_node/diag/v_s

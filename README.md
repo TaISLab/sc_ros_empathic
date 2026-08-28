@@ -18,7 +18,9 @@ manipulability/singularity avoidance).
   (reactive pure-pursuit-style path following), `experiment.py`
   (experimental-condition table, lap counter, joint-margin observable
   -- protocol glue only, no control-law logic), `subject_config.py`
-  (per-volunteer YAML loader).
+  (per-volunteer YAML loader). `ros_helpers.py` is the one rospy-using
+  module -- node-side glue (force tare, trial/lap manager, CSV logger)
+  shared by both nodes.
 - `scripts/shared_control_node.py` -- main ROS node: reads
   `franka_states` and the human-arm state, runs the shared-control
   law for the selected `~condition`, publishes the Cartesian velocity
@@ -430,12 +432,30 @@ Pass as `arg:=value`. Anything not listed lives in
 | `vel_arrow_gain` | `2.0` | arrow length, m per m/s. |
 | `config` | `.../config/shared_control.yaml` | parameter file loaded first (args above override it). |
 
-`baseline_aan.launch` (condition F) takes a subset: `robot_ip`,
-`base_link`, `path_center` / `path_radius` / `path_normal`, `rate_hz`,
-`rviz` / `show_plane` / `rviz_config`, `record` / `trial_label` /
-`bag_dir`, `human_arm_points_topic`, `robot_bringup`, plus its own
-impedance-AAN knobs (`impedance_stiffness`, `impedance_damping`,
-`assist_admittance_gain`, `deadband_m`, `assist_ramp`).
+### Condition F -- `baseline_aan.launch`
+
+A different controller (impedance-AAN, Zhang et al. [9]), nominal
+placement only, but the **same node-side infrastructure** as the main
+node (via `sc_ros_empathic.ros_helpers`): startup force tare + `~tare`
+service, direction-aware jitter-robust lap counter, `trial_laps` /
+`trial_end` auto-shutdown (node is `required="true"`), per-cycle CSV
+log, and the same conservative admittance / loop defaults.
+
+```bash
+roslaunch sc_ros_empathic baseline_aan.launch subject:=S01 record:=true csv:=true trial_laps:=4
+```
+
+Shared args: `subject`, `trial_label`, `path_center` / `path_radius` /
+`path_normal` / `path_direction`, `admittance_mass` /
+`admittance_damping`, `force_deadzone_N`, `force_tare_s`, `v_max`,
+`lpf_alpha`, `rate_hz`, `trial_laps`, `trial_end`, `record` / `bag_dir`,
+`csv` / `csv_dir` / `csv_path`, `rviz` / `show_plane` / `rviz_config`,
+`robot_bringup`, `human_arm_points_topic`, `robot_ip`, `base_link`.
+Impedance-AAN knobs (**placeholders, set from [9]**):
+`impedance_stiffness`, `impedance_damping`, `assist_admittance_gain`,
+`deadband_m`, `assist_ramp`. Not applicable: the four-factor knobs,
+`condition`, `jacobian_source`, `Ka` / `cruise_speed` / `follower_mode`,
+`show_vel_arrows` / `show_eta_text`.
 
 ## Troubleshooting
 
