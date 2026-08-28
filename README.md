@@ -192,10 +192,12 @@ close the bag / CSV. Lap count comes from `~diag/path_progress[1]`
 ## Logging (CSV, no rosbag needed)
 
 `csv:=true` writes one row per control cycle to
-`~/sc_ros_empathic_logs/<label>_<YYYY-MM-DD-HH-MM-SS>.csv`, where
-`<label>` is `trial_label:=` if you pass it (so the CSV basename
-matches the rosbag's), else the condition id. Override the directory
-with `csv_dir:=`, or give an exact file with `csv_path:=`. Columns:
+`~/sc_ros_empathic_logs/<label>_<YYYY-MM-DD-HH-MM-SS>.csv`. `<label>`
+defaults to `<subject>_<condition>` when you pass `subject:=` (e.g.
+`S01_B_baseline_m2`), else just `<condition>`; `trial_label:=`
+overrides it. The rosbag (`record:=true`) uses the **same** basename in
+`~/sc_ros_empathic_bags/`. Override the CSV dir with `csv_dir:=`, or
+give an exact file with `csv_path:=`. Columns:
 `t, condition, lap, s_near, cross_track, px..pz, vh_*, vr_*, vs_*,
 fx..fz, eta_h, eta_r, eta_s, smoothness_h, directness_h,
 joint_safety_h, manip_h, m1..m4, m_min, w_qr` -- everything the
@@ -207,9 +209,10 @@ of `record:=true` (the rosbag); use either or both.
 
 **Off by default.** No bag is written unless you pass `record:=true`.
 Then a `rosbag record` node writes to
-`<bag_dir>/<trial_label>_<YYYY-MM-DD-HH-MM-SS>.bag`
-(`bag_dir` defaults to `~/sc_ros_empathic_bags`, `trial_label` to
-`trial`). The `-o` timestamp means re-runs never overwrite. Recording
+`<bag_dir>/<label>_<YYYY-MM-DD-HH-MM-SS>.bag` (`bag_dir` defaults to
+`~/sc_ros_empathic_bags`; `<label>` = `<subject>_<condition>` or just
+`<condition>`, same as the CSV). The `-o` timestamp means re-runs never
+overwrite. Recording
 starts with the launch and runs for the whole session -- one bag per
 session; slice individual trials offline by the `path_progress` lap
 index (`>= 1`; lap 0 is the training loop, each trial is four loops).

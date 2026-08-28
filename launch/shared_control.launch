@@ -116,9 +116,13 @@
        close the bag/CSV. -->
   <arg name="trial_laps" default="0"/>
 
+  <!-- Bag / CSV basename: <subject>_<condition> when subject:= is
+       given, else just <condition>. Both the rosbag ('-o') and the CSV
+       append _<YYYY-MM-DD-HH-MM-SS>. Override explicitly if needed. -->
+  <arg name="trial_label" default="$(eval (subject + '_' + condition) if subject else condition)"/>
+
   <!-- Bag recording of the trial. -->
   <arg name="record"      default="false"/>
-  <arg name="trial_label" default="trial"/>
   <arg name="bag_dir"     default="$(env HOME)/sc_ros_empathic_bags"/>
 
   <!-- Plain-CSV log (one row per cycle), analysis without the bag.

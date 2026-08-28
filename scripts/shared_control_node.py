@@ -475,15 +475,20 @@ class SharedControlNode(object):
         # Optional plain-CSV log (one row per control cycle) -- an
         # analysis-ready file that does not need the rosbag. ~csv_path
         # gives an explicit file; else ~csv_dir auto-names
-        # <label>_<YYYY-MM-DD-HH-MM-SS>.csv, where <label> is
-        # ~trial_label if set (matching the rosbag basename), else the
-        # condition id. Empty ~csv_path and ~csv_dir -> no CSV.
+        # <label>_<YYYY-MM-DD-HH-MM-SS>.csv (same basename as the
+        # rosbag), where <label> = ~trial_label if set, else
+        # <subject>_<condition> (subject id from the loaded YAML) or
+        # just <condition>. Empty ~csv_path and ~csv_dir -> no CSV.
         self.csv_fh = None
         self.csv_w = None
         csv_path = rospy.get_param('~csv_path', '')
         csv_dir = rospy.get_param('~csv_dir', '')
         if not csv_path and csv_dir:
-            label = rospy.get_param('~trial_label', '') or self.condition_id
+            label = rospy.get_param('~trial_label', '')
+            if not label:
+                sid = (self.subject.subject_id + '_'
+                       if self.subject is not None else '')
+                label = sid + self.condition_id
             csv_path = os.path.join(
                 os.path.expanduser(csv_dir),
                 '%s_%s.csv' % (label, time.strftime('%Y-%m-%d-%H-%M-%S')))
