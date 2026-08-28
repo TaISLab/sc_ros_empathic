@@ -499,9 +499,11 @@ class SharedControlNode(object):
                 os.makedirs(d)
             self.csv_fh = open(csv_path, 'w')
             self.csv_w = csv.writer(self.csv_fh)
+            self._csv_t0 = None
+            self._csv_rows = 0
             self.csv_w.writerow(
-                ['t', 'condition', 'lap', 's_near', 'cross_track',
-                 'px', 'py', 'pz',
+                ['t', 't_rel', 'wall_time', 'condition', 'lap', 's_near',
+                 'cross_track', 'px', 'py', 'pz',
                  'vh_x', 'vh_y', 'vh_z', 'vr_x', 'vr_y', 'vr_z',
                  'vs_x', 'vs_y', 'vs_z', 'fx', 'fy', 'fz',
                  'eta_h', 'eta_r', 'eta_s',
@@ -745,7 +747,13 @@ class SharedControlNode(object):
         if self.J_robot is not None:
             w = float(manipulability_index(self.J_robot))
         fh = factors_h or {}
-        row = [stamp.to_sec(), self.condition_id, lap, s_near, cross_track,
+        ts = stamp.to_sec()
+        if self._csv_t0 is None:
+            self._csv_t0 = ts
+        wall = (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(ts))
+                + ('.%03d' % int((ts % 1.0) * 1000)))
+        row = [ts, ts - self._csv_t0, wall,
+               self.condition_id, lap, s_near, cross_track,
                self.x[0], self.x[1], self.x[2],
                self.v_h[0], self.v_h[1], self.v_h[2],
                v_r[0], v_r[1], v_r[2], v_s[0], v_s[1], v_s[2],
@@ -755,8 +763,15 @@ class SharedControlNode(object):
                fh.get('directness', float('nan')),
                fh.get('joint_safety', float('nan')),
                fh.get('manipulability', float('nan'))] + m + [w]
-        self.csv_w.writerow(['%.6g' % v if isinstance(v, float) else v
-                             for v in row])
+        # row[0]=t (epoch), row[1]=t_rel: need full precision, not %g.
+        out = [row[0], row[1]] + [
+            ('%.6g' % v if isinstance(v, float) else v) for v in row[2:]]
+        out[0] = '%.3f' % out[0]
+        out[1] = '%.3f' % out[1]
+        self.csv_w.writerow(out)
+        self._csv_rows += 1
+        if self._csv_rows % 200 == 0:        # ~1 s at 200 Hz
+            self.csv_fh.flush()
 
     def _close_csv(self):
         if self.csv_fh is not None:

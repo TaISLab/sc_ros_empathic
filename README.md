@@ -198,12 +198,14 @@ defaults to `<subject>_<condition>` when you pass `subject:=` (e.g.
 overrides it. The rosbag (`record:=true`) uses the **same** basename in
 `~/sc_ros_empathic_bags/`. Override the CSV dir with `csv_dir:=`, or
 give an exact file with `csv_path:=`. Columns:
-`t, condition, lap, s_near, cross_track, px..pz, vh_*, vr_*, vs_*,
-fx..fz, eta_h, eta_r, eta_s, smoothness_h, directness_h,
-joint_safety_h, manip_h, m1..m4, m_min, w_qr` -- everything the
-Sec. V-D metrics and the traced-path plots need, directly loadable
-with pandas. The file is closed cleanly on Ctrl-C. This is independent
-of `record:=true` (the rosbag); use either or both.
+`t` (epoch s), `t_rel` (s from the first row), `wall_time`
+(`YYYY-MM-DD HH:MM:SS.mmm`), `condition, lap, s_near, cross_track,
+px..pz, vh_*, vr_*, vs_*, fx..fz, eta_h, eta_r, eta_s, smoothness_h,
+directness_h, joint_safety_h, manip_h, m1..m4, m_min, w_qr` --
+everything the Sec. V-D metrics and the traced-path plots need,
+directly loadable with pandas (plot against `t_rel`). Flushed ~1x/s and
+closed cleanly on Ctrl-C. Independent of `record:=true`; use either or
+both.
 
 ## Recording trials (rosbag)
 
