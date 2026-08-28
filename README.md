@@ -341,6 +341,88 @@ Condition F (impedance-AAN baseline, separate node):
 roslaunch sc_ros_empathic baseline_aan.launch record:=true trial_label:=P03_nominal_F
 ```
 
+## Launch arguments (`shared_control.launch`)
+
+Pass as `arg:=value`. Anything not listed lives in
+`config/shared_control.yaml`; an `arg` here overrides the file.
+
+### Experiment
+
+| arg | default | meaning |
+|---|---|---|
+| `condition` | `E_extended_m4` | `A_standalone` \| `B_baseline_m2` \| `C_jointsafety_m3` \| `D_manip_m3` \| `E_extended_m4`. Unknown -> startup aborts. |
+| `subject` | *(empty)* | volunteer id -> loads `config/subjects/<subject>.yaml` (id, demographics, arm lengths, joint ranges). Empty -> plain params. |
+| `placement` | `nominal` | label only (logging / file naming); geometry is `path_*`. |
+| `trial_laps` | `0` | end after N laps (0 = until Ctrl-C). Paper's trial = 4. |
+
+### Circle geometry
+
+| arg | default | meaning |
+|---|---|---|
+| `path_center` | `[0.45, 0.0, 0.45]` | circle centre in the base frame `[x, y, z]` m. |
+| `path_radius` | `0.05` | circle radius, m. |
+| `path_normal` | `[0.0, 0.0, 1.0]` | circle-plane normal; `[0,0,1]` = horizontal. |
+| `path_direction` | `forward` | `forward` \| `reverse` -- which way round it is traced. |
+
+### Path follower / loop tuning
+
+| arg | default | meaning |
+|---|---|---|
+| `follower_mode` | `crosstrack` | `crosstrack` (tracks the reference radius) \| `lookahead` (verbatim [1] law, cuts corners under lag). |
+| `Ka` | `1.0` | path-following proportional gain, 1/s. |
+| `cruise_speed` | `0.03` | tangential feed-forward around the circle, m/s (0 = proportional-only). |
+| `rho_min` | `0.02` | pure-pursuit lookahead on the path, m (`lookahead` mode). |
+| `v_max` | `0.08` | EE Cartesian speed cap, m/s. |
+| `lpf_alpha` | `0.15` | LPF on the emergent command (smaller = smoother). |
+| `admittance_mass` | `[2.0, 2.0, 2.0]` | `M_h` per axis (larger = more sluggish). |
+| `admittance_damping` | `[40.0, 40.0, 40.0]` | `B_h`; steady-state `v_h = f / B_h`. |
+| `force_deadzone_N` | `2.0` | interaction-force dead-zone, N. |
+| `rate_hz` | `200.0` | Python control-loop rate. |
+
+### Robot Jacobian (manipulability factor)
+
+| arg | default | meaning |
+|---|---|---|
+| `jacobian_source` | `analytic` | `analytic` (`fr3_model.py`, no PyKDL) \| `kdl` \| `topic` \| `none`. |
+| `robot_jacobian_topic` | `/taislab_controller/jacobian` | 6xN `Float64MultiArray` row-major (only `topic` mode). PLACEHOLDER. |
+
+### Topics / frames
+
+| arg | default | meaning |
+|---|---|---|
+| `robot_ip` | `172.16.0.2` | FR3 IP (only used if `robot_bringup:=true`). |
+| `base_link` / `ee_link` | `fr3_link0` / `fr3_link8` | FR3 URDF link names; also the marker/command frame. |
+| `human_joint_state_topic` | `/right_arm/joint_states` | `sensor_msgs/JointState`, `position[0:4] = q1..q4`. PLACEHOLDER. |
+| `human_link_lengths_topic` | `/right_arm/link_lengths` | `Float64MultiArray [l1, l2]`. PLACEHOLDER. |
+| `human_arm_points_topic` | `/right_arm/arm_points` | `Float64MultiArray [sx..sz, ex..ez, wx..wz]`, fixed frame. PLACEHOLDER. |
+| `human_points_frame` | `fr3_link0` | frame the pipeline's arm points are in. |
+| `robot_bringup` | `false` | `true` also launches the FR3 + velocity controller (normally launched separately). |
+
+### Logging / visualisation
+
+| arg | default | meaning |
+|---|---|---|
+| `record` | `false` | `true` -> rosbag of all Sec. V-D topics to `<bag_dir>/<trial_label>_<datetime>.bag`. |
+| `bag_dir` | `~/sc_ros_empathic_bags` | rosbag output directory. |
+| `csv` | `false` | `true` -> per-cycle CSV to `<csv_dir>/<trial_label>_<datetime>.csv`. |
+| `csv_dir` | `~/sc_ros_empathic_logs` | CSV output directory. |
+| `csv_path` | *(empty)* | exact CSV file path (overrides `csv_dir` naming). |
+| `trial_label` | `<subject>_<condition>` or `<condition>` | basename for the bag and the CSV. |
+| `rviz` | `true` | start RViz with `rviz_config`. |
+| `rviz_config` | `.../rviz/shared_control.rviz` | RViz config file. |
+| `show_plane` | `true` | translucent disc filling the circle. |
+| `show_vel_arrows` | `true` | `v_h`/`v_r`/`v_s` as arrows at the EE. |
+| `show_eta_text` | `true` | `eta_h`/`eta_r`/`eta_s` as floating text. |
+| `vel_arrow_gain` | `2.0` | arrow length, m per m/s. |
+| `config` | `.../config/shared_control.yaml` | parameter file loaded first (args above override it). |
+
+`baseline_aan.launch` (condition F) takes a subset: `robot_ip`,
+`base_link`, `path_center` / `path_radius` / `path_normal`, `rate_hz`,
+`rviz` / `show_plane` / `rviz_config`, `record` / `trial_label` /
+`bag_dir`, `human_arm_points_topic`, `robot_bringup`, plus its own
+impedance-AAN knobs (`impedance_stiffness`, `impedance_damping`,
+`assist_admittance_gain`, `deadband_m`, `assist_ramp`).
+
 ## Troubleshooting
 
 **Robot oscillates hard / fights you.** The Python loop (~200 Hz) +

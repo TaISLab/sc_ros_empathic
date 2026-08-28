@@ -128,9 +128,11 @@
   <arg name="bag_dir"     default="$(env HOME)/sc_ros_empathic_bags"/>
 
   <!-- Plain-CSV log (one row per cycle), analysis without the bag.
-       csv:=true -> ~/sc_ros_empathic_logs/<condition>_<stamp>.csv -->
-  <arg name="csv"     default="false"/>
-  <arg name="csv_dir" default="$(env HOME)/sc_ros_empathic_logs"/>
+       csv:=true -> <csv_dir>/<trial_label>_<YYYY-MM-DD_HH-MM-SS>.csv.
+       csv_path:= gives an exact file instead. -->
+  <arg name="csv"      default="false"/>
+  <arg name="csv_dir"  default="$(env HOME)/sc_ros_empathic_logs"/>
+  <arg name="csv_path" default=""/>
 
   <!-- ================= robot bring-up (OPT-IN) ================= -->
   <!-- OFF by default: in this lab the FR3 bring-up + the external
@@ -174,6 +176,7 @@
     <param name="trial_laps" value="$(arg trial_laps)"/>
     <param name="trial_label" value="$(arg trial_label)"/>
     <param name="csv_dir" value="$(eval csv_dir if str(csv).lower() == 'true' else '')"/>
+    <param name="csv_path" value="$(arg csv_path)"/>
     <param name="v_max" value="$(arg v_max)"/>
     <param name="lpf_alpha" value="$(arg lpf_alpha)"/>
     <rosparam param="admittance_mass" subst_value="true">$(arg admittance_mass)</rosparam>
