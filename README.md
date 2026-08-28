@@ -289,6 +289,32 @@ roslaunch sc_ros_empathic baseline_aan.launch record:=true trial_label:=P03_nomi
 
 ## Troubleshooting
 
+**Robot oscillates hard / fights you.** The Python loop (~200 Hz) +
+the C++ velocity controller's zero-order hold form a feedback loop that
+goes unstable if the gains are too high for the round-trip latency.
+Tuning knobs are launch args (override `config/shared_control.yaml`):
+
+1. Start the EE **on the circle** (within ~2 cm) so the command never
+   saturates `v_max` while approaching.
+2. Isolate it: run `condition:=A_standalone` (no path follower, pure
+   admittance). Smooth to guide -> the instability is in the
+   path-following / shared-control loop; violent in A too -> it is the
+   admittance or the velocity controller itself.
+3. Path-following loop: lower `Ka` (`Ka:=0.5`) and `v_max`
+   (`v_max:=0.05`); increase smoothing with a *smaller* `lpf_alpha`
+   (`lpf_alpha:=0.1`). Raise back up once stable.
+4. Feels twitchy under your hand: stiffer admittance --
+   `admittance_damping:="[60,60,60]"` (steady-state `v_h = f / B_h`),
+   `admittance_mass:="[3,3,3]"`.
+5. `rqt_plot /shared_control_node/diag/v_s/vector/x:y:z` and
+   `.../diag/v_h/...` while it oscillates -- a square-ish wave hitting
+   `+-v_max` is loop instability; a ramp that never settles is a
+   residual force bias (re-tare).
+
+Defaults were lowered to `Ka=1.0`, `v_max=0.08`, `lpf_alpha=0.15`,
+`B_h=40` for this reason -- they are conservative starting points, not
+tuned values.
+
 **Robot drifts / limit-cycles when you let go (won't trace the
 circle).** `O_F_ext_hat_K` is not zero at rest -- an EE payload / handle
 not in the FR3 load model leaves a roughly constant offset (mostly

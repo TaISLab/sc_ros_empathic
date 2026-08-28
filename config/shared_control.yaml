@@ -14,9 +14,11 @@
 # not treat any number below as validated on hardware.
 
 # --- Loop / output shaping -------------------------------------------
+# Conservative starting values for a velocity interface with loop
+# latency. Raise v_max / Ka once the loop is confirmed stable.
 rate_hz: 200.0            # Python loop rate (see node docstring: NOT 1 kHz)
-v_max: 0.15               # EE Cartesian speed cap [m/s]
-lpf_alpha: 0.2            # first-order LPF on the emergent command v_s
+v_max: 0.08              # EE Cartesian speed cap [m/s]
+lpf_alpha: 0.15          # first-order LPF on the emergent command v_s (smaller = smoother)
 dt_lookahead: 0.2         # horizon for the manipulability Jacobian prediction [s]
 
 # --- Robot Jacobian source (manipulability factor) ---------------
@@ -31,12 +33,12 @@ jacobian_source: analytic
 max_jacobian_age: 0.2     # s; topic mode: older -> factor dropped, warned
 
 # --- Reactive path follower ----------------------------------------
-Ka: 2.0                   # proportional path-following gain (v_r = Ka (x_d - x))
+Ka: 1.0                   # proportional path-following gain 1/s (v_r = Ka (x_d - x)); was 2.0
 
 # --- Admittance model (force -> human-intent velocity v_h) ---------
-admittance_mass:    [1.0, 1.0, 1.0]     # M_h, per Cartesian axis
-admittance_damping: [10.0, 10.0, 10.0]  # B_h, per Cartesian axis
-force_deadzone_N: 1.0     # raise (e.g. 3-5) if the robot still drifts when released
+admittance_mass:    [2.0, 2.0, 2.0]     # M_h, per Cartesian axis (larger = more sluggish)
+admittance_damping: [40.0, 40.0, 40.0]  # B_h; steady-state v_h = f / B_h (larger = harder to push)
+force_deadzone_N: 2.0     # raise (e.g. 3-5) if the robot still drifts when released
 force_lpf_alpha: 0.1
 # Startup tare: average O_F_ext_hat_K for this many seconds (HANDS OFF)
 # and subtract it, so an EE payload not in the FR3 load model does not
