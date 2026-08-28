@@ -1,5 +1,8 @@
-# RViz config for sc_ros_empathic: shows the circle to trace (outline +
-# translucent disc) and the current end-effector, plus the FR3 TF tree.
+# RViz config for sc_ros_empathic: the circle to trace (outline + disc),
+# the end-effector + its trail, the v_h/v_r/v_s arrows and the eta text,
+# plus the FR3 TF tree. Default view is TopDownOrtho, looking straight
+# down onto the (horizontal) circle plane, centred on the nominal
+# centre [0.45, 0]; a "3D Orbit" view is saved for free rotation.
 # roslaunch loads it via  rviz -d $(find sc_ros_empathic)/rviz/shared_control.rviz
 Panels:
   - Class: rviz/Displays
@@ -46,16 +49,26 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Class: rviz/Orbit
-      Name: Current View
-      Distance: 1.4
-      Focal Point:
-        X: 0.45
-        Y: 0.0
-        Z: 0.4
-      Pitch: 0.5
-      Yaw: 0.9
+      Class: rviz/TopDownOrtho
+      Name: Top-down (circle plane)
+      Target Frame: <Fixed Frame>
+      X: 0.45
+      Y: 0.0
+      Scale: 1400
+      Angle: 0
+      Invert Z Axis: false
       Near Clip Distance: 0.01
+    Saved:
+      - Class: rviz/Orbit
+        Name: 3D Orbit
+        Distance: 1.2
+        Focal Point:
+          X: 0.45
+          Y: 0.0
+          Z: 0.45
+        Pitch: 0.6
+        Yaw: 0.9
+        Near Clip Distance: 0.01
   Value: true
 Window Geometry:
   Displays:

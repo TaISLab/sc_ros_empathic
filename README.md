@@ -114,7 +114,11 @@ plane-agnostic.
 ## What RViz shows
 
 `rviz:=true` loads `rviz/shared_control.rviz` (Fixed Frame `fr3_link0`,
-one MarkerArray display on `/sc_ros_empathic/viz`). In that array:
+one MarkerArray display on `/sc_ros_empathic/viz`). The default view is
+**top-down orthographic**, looking straight down onto the horizontal
+circle plane and centred on the nominal centre `[0.45, 0]` -- the same
+x-y view as the paper's traced-path figures; a "3D Orbit" view is saved
+in the Views panel for free rotation. In that array:
 
 | element | marker | meaning |
 |---|---|---|
