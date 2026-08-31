@@ -120,6 +120,9 @@
        alive at zero velocity and you Ctrl-C when ready. -->
   <arg name="trial_laps" default="0"/>
   <arg name="trial_end"  default="shutdown"/>
+  <!-- C/E only: if true, hold zero velocity while joint_safety has no
+       fresh q_h + l1,l2 (so an invalid trial cannot be recorded). -->
+  <arg name="require_fresh_human" default="false"/>
 
   <!-- Bag / CSV basename: <subject>_<condition> when subject:= is
        given, else just <condition>. Both the rosbag ('-o') and the CSV
@@ -180,6 +183,7 @@
     <param name="cruise_speed" value="$(arg cruise_speed)"/>
     <param name="follower_mode" value="$(arg follower_mode)"/>
     <param name="trial_laps" value="$(arg trial_laps)"/>
+    <param name="require_fresh_human" value="$(arg require_fresh_human)"/>
     <param name="trial_label" value="$(arg trial_label)"/>
     <param name="csv_dir" value="$(eval csv_dir if str(csv).lower() == 'true' else '')"/>
     <param name="csv_path" value="$(arg csv_path)"/>

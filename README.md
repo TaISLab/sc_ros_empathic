@@ -221,8 +221,10 @@ format). Override the CSV dir with `csv_dir:=`, or give an exact file
 with `csv_path:=`. Columns:
 `t` (epoch s), `t_rel` (s from the first row), `wall_time`
 (`YYYY-MM-DD HH:MM:SS.mmm`), `condition, lap, s_near, cross_track,
-px..pz, vh_*, vr_*, vs_*, fx..fz, eta_h, eta_r, eta_s, smoothness_h,
-directness_h, joint_safety_h, manip_h, m1..m4, m_min, w_qr` --
+px..pz, vh_*, vr_*, vs_*, fx..fz`, `human_fresh` (0/1 -- fresh
+q_h + l1,l2 this cycle; `joint_safety_h` / `m*` are `NaN` when 0),
+`jac_fresh` (0/1), `eta_h, eta_r, eta_s, smoothness_h, directness_h,
+joint_safety_h, manip_h, m1..m4, m_min, w_qr` --
 everything the Sec. V-D metrics and the traced-path plots need,
 directly loadable with pandas (plot against `t_rel`). Flushed ~1x/s and
 closed cleanly on Ctrl-C. Independent of `record:=true`; use either or
@@ -370,6 +372,7 @@ Pass as `arg:=value`. Anything not listed lives in
 | `placement` | `nominal` | label only (logging / file naming); geometry is `path_*`. |
 | `trial_laps` | `0` | end after N laps (0 = until Ctrl-C). Paper's trial = 4. |
 | `trial_end` | `shutdown` | at `trial_laps`: `shutdown` (node exits -> whole launch down, bag/CSV closed) \| `hold` (stay at zero velocity). |
+| `require_fresh_human` | `false` | C/E: hold zero velocity while `joint_safety` has no fresh `q_h` + `l1,l2`, so an all-NaN trial cannot be recorded. Recommend `true` for C and E. |
 
 ### Circle geometry
 
@@ -458,6 +461,20 @@ Impedance-AAN knobs (**placeholders, set from [9]**):
 `show_vel_arrows` / `show_eta_text`.
 
 ## Troubleshooting
+
+**`joint_safety_h` / `m1..m4` / `m_min` are all `NaN` (C, E).** The
+human joint state never arrived fresh, so `joint_safety` was dropped
+every cycle -- an **invalid trial** for C/E. Check the `human_fresh`
+CSV column (0 throughout confirms it) and the node log (it `logerr`s
+every 10 s). Causes, in order: (1) the visuo-tactile pipeline is not
+publishing valid `q_h` on `~human_joint_state_topic` -- `rostopic hz`
+and `rostopic echo -n1` it, and confirm `position` has >= 4 values and
+the pipeline's arm-IK isn't emitting NaN / missing TFs; (2) `l1,l2`
+have no source -- pass `subject:=SXX` with `l1_m`/`l2_m` filled in the
+YAML, or `human_link_lengths:="[l1, l2]"`; (3) the topics are slower
+than `max_human_state_age` (0.3 s). For C/E always set
+`require_fresh_human:=true` so the robot holds still until the human
+state is live and you cannot record an all-NaN session.
 
 **Robot oscillates hard / fights you.** The Python loop (~200 Hz) +
 the C++ velocity controller's zero-order hold form a feedback loop that

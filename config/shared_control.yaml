@@ -51,6 +51,10 @@ lam: 1.02
 # (node stays at zero velocity, operator ends the session).
 trial_laps: 0
 trial_end: shutdown
+# C/E only: hold zero velocity while joint_safety has no fresh q_h +
+# l1,l2, so a session with joint_safety_h / m* all NaN cannot be
+# recorded unnoticed. Recommended true for conditions C and E.
+require_fresh_human: false
 
 # --- Admittance model (force -> human-intent velocity v_h) ---------
 admittance_mass:    [2.0, 2.0, 2.0]     # M_h, per Cartesian axis (larger = more sluggish)

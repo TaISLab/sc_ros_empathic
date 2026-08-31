@@ -234,6 +234,17 @@ class SharedControlNode(object):
         self._trial_done = False
         self._trial_done_t = None
 
+        # If the condition needs joint_safety (C, E) and no fresh q_h +
+        # l1,l2 ever arrive, the factor is silently dropped every cycle
+        # -> a whole session recorded with joint_safety_h / m* all NaN,
+        # which is an INVALID trial for those conditions. With
+        # ~require_fresh_human:=true the node holds ZERO velocity (and
+        # logs an error) until the human state is fresh, so you cannot
+        # record such a session unnoticed.
+        self.require_fresh_human = bool(
+            rospy.get_param('~require_fresh_human', False))
+        self._human_ever_fresh = False
+
         # ------------------------------------------------------------
         # Admittance model for v_h (force -> human-intent velocity).
         # This is the "admittance law already in place" referred to in
@@ -521,6 +532,7 @@ class SharedControlNode(object):
                  'cross_track', 'px', 'py', 'pz',
                  'vh_x', 'vh_y', 'vh_z', 'vr_x', 'vr_y', 'vr_z',
                  'vs_x', 'vs_y', 'vs_z', 'fx', 'fy', 'fz',
+                 'human_fresh', 'jac_fresh',
                  'eta_h', 'eta_r', 'eta_s',
                  'smoothness_h', 'directness_h', 'joint_safety_h', 'manip_h',
                  'm1', 'm2', 'm3', 'm4', 'm_min', 'w_qr'])
@@ -541,6 +553,20 @@ class SharedControlNode(object):
 
         self.rate_hz = rospy.get_param('~rate_hz', 200.0)
         self.dt = 1.0 / self.rate_hz
+
+        if 'joint_safety' in self.cond_factors:
+            has_ll = (self.l1_static is not None
+                      or rospy.get_param('~human_link_lengths', None) is not None
+                      or self.subject is not None)
+            rospy.logwarn('shared_control_node: condition %s uses joint_safety '
+                          '-- needs fresh q_h on %s AND l1,l2 (topic %s%s). '
+                          'Run `rostopic hz` on both; with '
+                          '~require_fresh_human:=true the node holds zero '
+                          'velocity until they arrive.',
+                          self.condition_id, self.human_joint_state_topic,
+                          self.human_link_lengths_topic,
+                          '' if has_ll else ' -- NO l1,l2 fallback configured, '
+                          'pass subject:= or ~human_link_lengths')
 
         rospy.loginfo('shared_control_node: waiting for first franka_states '
                        'on %s ...', self.franka_states_topic)
@@ -592,20 +618,28 @@ class SharedControlNode(object):
     def _human_joint_state_cb(self, msg):
         if len(msg.position) < 4:
             rospy.logwarn_throttle(
-                5.0, 'shared_control_node: %s published <4 positions '
-                '(got %d); ignoring.', self.human_joint_state_topic,
+                5.0, 'shared_control_node: %s published %d positions '
+                '(need >= 4: q1..q4); ignoring.', self.human_joint_state_topic,
                 len(msg.position))
             return
+        if self.q_h is None:
+            rospy.loginfo('shared_control_node: first q_h on %s = %s',
+                          self.human_joint_state_topic,
+                          np.round(msg.position[0:4], 3).tolist())
         self.q_h = np.array(msg.position[0:4])
         self.q_h_stamp = rospy.Time.now()
 
     def _human_link_lengths_cb(self, msg):
         if len(msg.data) < 2:
             rospy.logwarn_throttle(
-                5.0, 'shared_control_node: %s published <2 values '
-                '(got %d); ignoring.', self.human_link_lengths_topic,
+                5.0, 'shared_control_node: %s published %d values '
+                '(need >= 2: l1, l2); ignoring.', self.human_link_lengths_topic,
                 len(msg.data))
             return
+        if self.l1 is None:
+            rospy.loginfo('shared_control_node: first l1,l2 on %s = %.3f, %.3f',
+                          self.human_link_lengths_topic,
+                          float(msg.data[0]), float(msg.data[1]))
         self.l1, self.l2 = float(msg.data[0]), float(msg.data[1])
         self.link_lengths_stamp = rospy.Time.now()
 
@@ -755,7 +789,7 @@ class SharedControlNode(object):
     # CSV log (one row per cycle; analysis without the rosbag)
     # ------------------------------------------------------------
     def _write_csv_row(self, stamp, s_near, lap, cross_track, v_r, v_s,
-                        factors_h, eta_h, eta_r, eta_s, human_fresh,
+                        factors_h, eta_h, eta_r, eta_s, human_fresh, jac_fresh,
                         l1_cur, l2_cur):
         m = [float('nan')] * 5
         if human_fresh and self.q_h is not None:
@@ -776,6 +810,7 @@ class SharedControlNode(object):
                self.v_h[0], self.v_h[1], self.v_h[2],
                v_r[0], v_r[1], v_r[2], v_s[0], v_s[1], v_s[2],
                self.f_filtered[0], self.f_filtered[1], self.f_filtered[2],
+               int(bool(human_fresh)), int(bool(jac_fresh)),
                eta_h, eta_r, eta_s,
                fh.get('smoothness', float('nan')),
                fh.get('directness', float('nan')),
@@ -854,6 +889,8 @@ class SharedControlNode(object):
             #    SILENT-WRONG (use garbage q_h / a stale Jacobian).
             human_fresh = self._human_state_fresh()
             jac_fresh = self._jacobian_fresh()
+            if human_fresh:
+                self._human_ever_fresh = True
             active_factors = []
             for f in self.cond_factors:
                 if f == 'joint_safety' and not human_fresh:
@@ -876,13 +913,29 @@ class SharedControlNode(object):
                 warned_stale_jacobian = False
 
             need_human = 'joint_safety' in self.cond_factors
-            if need_human and not human_fresh and not warned_stale_human_state:
-                rospy.logwarn('shared_control_node: human arm state '
-                               'stale/missing (topics %s, %s) -- condition '
-                               '%s running WITHOUT joint_safety until it '
-                               'recovers.', self.human_joint_state_topic,
-                               self.human_link_lengths_topic, self.condition_id)
-                warned_stale_human_state = True
+            hold_for_human = (need_human and not human_fresh
+                              and self.require_fresh_human)
+            if need_human and not human_fresh:
+                if not warned_stale_human_state:
+                    rospy.logwarn('shared_control_node: human arm state '
+                                   'stale/missing (topics %s, %s) -- condition '
+                                   '%s WITHOUT joint_safety.',
+                                   self.human_joint_state_topic,
+                                   self.human_link_lengths_topic,
+                                   self.condition_id)
+                    warned_stale_human_state = True
+                # Keep shouting for the whole session, not just once --
+                # this is an invalid trial for a joint_safety condition.
+                rospy.logerr_throttle(
+                    10.0, 'shared_control_node: condition %s REQUIRES '
+                    'joint_safety but no fresh q_h+(l1,l2) -- %s. Check '
+                    '`rostopic hz %s %s`; set subject:= (filled l1_m/l2_m) '
+                    'or ~human_link_lengths for the l1,l2 fallback.',
+                    self.condition_id,
+                    'HOLDING ZERO VELOCITY (require_fresh_human)'
+                    if self.require_fresh_human else 'recording an INVALID '
+                    'trial (joint_safety_h/m* will be all NaN)',
+                    self.human_joint_state_topic, self.human_link_lengths_topic)
             if need_human and human_fresh and warned_stale_human_state:
                 rospy.loginfo('shared_control_node: human arm state '
                                'recovered, joint_safety re-enabled.')
@@ -914,8 +967,8 @@ class SharedControlNode(object):
                 factors_h, factors_r = {}, {}
                 self.core.v_prev = v_s  # keep smoothness reference coherent
 
-            if self._trial_done:
-                v_s = np.zeros(3)       # trial over -> hold still
+            if self._trial_done or hold_for_human:
+                v_s = np.zeros(3)       # trial over / waiting for q_h -> hold still
 
             # 5. Publish command + eta + diagnostics.
             stamp = rospy.Time.now()
@@ -939,7 +992,7 @@ class SharedControlNode(object):
             if self.csv_w is not None:
                 self._write_csv_row(stamp, s_near, lap, cross_track, v_r, v_s,
                                      factors_h, eta_h, eta_r, eta_s,
-                                     human_fresh, l1_cur, l2_cur)
+                                     human_fresh, jac_fresh, l1_cur, l2_cur)
 
             rate.sleep()
 
