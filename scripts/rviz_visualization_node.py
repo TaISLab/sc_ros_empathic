@@ -22,11 +22,17 @@ Minimal RViz visualization for the shared-control experiment:
   * eta_h / eta_r / eta_s as a floating TEXT marker above the EE (from
     ~eta). Disable with ~show_eta_text:=false. For a time plot use
     rqt_plot, not RViz.
-  * The human arm: shoulder/elbow/wrist as a SPHERE_LIST + LINE_STRIP
-    stick, from shared_control_node's ~diag/arm_points (pipeline, cyan)
-    and ~diag/arm_points_fk (FK of q_h,l1,l2 in the 'human_shoulder'
-    frame the launch's static TF anchors, magenta). A live 3-segment
-    stick = the human is being detected. Disable with ~show_arm:=false.
+  * The human arm as a SPHERE_LIST + LINE_STRIP stick:
+      - cyan: looked up directly from the pipeline's TF frames
+        ~human_shoulder_frame / ~human_elbow_frame / ~human_wrist_frame
+        (so it coincides with the points' own frames and starts at the
+        REAL shoulder).
+      - magenta: shared_control_node's ~diag/arm_points_fk (FK of
+        q_h,l1,l2), published in ~human_shoulder_frame so RViz anchors
+        it at the same shoulder. Pipeline-TF vs FK divergence is a
+        consistency check.
+    A live stick = the human is being detected. ~show_arm:=false hides
+    both. Needs tf2_ros.
 
 Publishes a single visualization_msgs/MarkerArray to ~viz_topic
 (default /sc_ros_empathic/viz -- an ABSOLUTE name so it does not depend
@@ -74,19 +80,30 @@ class RvizVisualizationNode(object):
         self.show_vel_arrows = bool(rospy.get_param('~show_vel_arrows', True))
         self.show_eta_text = bool(rospy.get_param('~show_eta_text', True))
         self.vel_arrow_gain = float(rospy.get_param('~vel_arrow_gain', 2.0))
-        # Human arm (shoulder/elbow/wrist) from shared_control_node:
-        # ~diag/arm_points  = pipeline points in their fixed frame
-        # ~diag/arm_points_fk = FK from q_h,l1,l2 in 'human_shoulder'
-        #                       (needs the static TF that the launch
-        #                        publishes). A live 3-segment stick =
-        #                        the human is being detected.
+        # Human arm stick. Primary source: the pipeline's own TF frames
+        # for shoulder/elbow/wrist (so it coincides with the points'
+        # reference frames and starts at the REAL shoulder). Secondary:
+        # ~diag/arm_points_fk (FK of q_h,l1,l2), which the node now
+        # publishes in the shoulder TF frame -> RViz anchors it there
+        # too, and pipeline-TF vs FK divergence is a consistency check.
         self.show_arm = bool(rospy.get_param('~show_arm', True))
+        self.arm_frames = [
+            rospy.get_param('~human_shoulder_frame', 'base_shoulder'),
+            rospy.get_param('~human_elbow_frame', 'RightForeArm'),
+            rospy.get_param('~human_wrist_frame', 'RightHand'),
+        ]
         sc = rospy.get_param('~sc_node', '/shared_control_node')
         self._v = {'v_h': None, 'v_r': None, 'v_s': None}
         self._eta = None
-        self._arm = {'arm_points': None, 'arm_points_fk': None}
+        self._arm_fk = None
 
         self.x_actual = None
+        self.tf_buffer = None
+        if self.show_arm:
+            import tf2_ros
+            self._tf2 = tf2_ros
+            self.tf_buffer = tf2_ros.Buffer()
+            self._tf_listener = tf2_ros.TransformListener(self.tf_buffer)
 
         self.viz_pub = rospy.Publisher(self.viz_topic, MarkerArray, queue_size=1)
         rospy.Subscriber(self.franka_states_topic, FrankaState,
@@ -98,12 +115,8 @@ class RvizVisualizationNode(object):
         if self.show_eta_text:
             rospy.Subscriber(sc + '/eta', Float64MultiArray, self._eta_cb, queue_size=1)
         if self.show_arm:
-            rospy.Subscriber(sc + '/diag/arm_points', PoseArray,
-                              lambda m: self._arm.__setitem__('arm_points', m),
-                              queue_size=1)
             rospy.Subscriber(sc + '/diag/arm_points_fk', PoseArray,
-                              lambda m: self._arm.__setitem__('arm_points_fk', m),
-                              queue_size=1)
+                              self._arm_fk_cb, queue_size=1)
 
         # The path itself is static: republish it at a slow rate so a
         # late-joining RViz instance still picks it up without needing
@@ -181,14 +194,72 @@ class RvizVisualizationNode(object):
             d.points.append(Point(x=p1[0], y=p1[1], z=p1[2]))
         return d
 
+    def _arm_fk_cb(self, msg):
+        self._arm_fk = msg
+
+    def _stick(self, base_id, frame_id, pts_xyz, rgba):
+        """LINE_STRIP + SPHERE_LIST for 3 points in `frame_id`. Empty
+        list -> DELETE both markers."""
+        line = Marker()
+        line.header = self._header()
+        line.ns = 'sc_ros_empathic'
+        line.id = base_id
+        line.type = Marker.LINE_STRIP
+        sph = Marker()
+        sph.header = self._header()
+        sph.ns = 'sc_ros_empathic'
+        sph.id = base_id + 1
+        sph.type = Marker.SPHERE_LIST
+        if not pts_xyz or len(pts_xyz) < 3:
+            line.action = sph.action = Marker.DELETE
+            return [line, sph]
+        line.header.frame_id = sph.header.frame_id = frame_id
+        line.action = sph.action = Marker.ADD
+        line.pose.orientation.w = sph.pose.orientation.w = 1.0
+        line.scale.x = 0.008
+        sph.scale.x = sph.scale.y = sph.scale.z = 0.025
+        line.color = sph.color = ColorRGBA(*rgba)
+        for p in pts_xyz[:3]:
+            q = Point(x=float(p[0]), y=float(p[1]), z=float(p[2]))
+            line.points.append(q)
+            sph.points.append(q)
+        return [line, sph]
+
+    def _arm_tf_points(self):
+        """(shoulder, elbow, wrist) in ~base_frame from the pipeline's
+        TF frames, or [] if any lookup fails."""
+        out = []
+        for fr in self.arm_frames:
+            try:
+                tr = self.tf_buffer.lookup_transform(
+                    self.base_frame, fr, rospy.Time(0), rospy.Duration(0.0))
+            except self._tf2.TransformException:
+                rospy.logwarn_throttle(
+                    5.0, 'sc_ros_empathic_viz: TF %s -> %s missing -- human '
+                    'not detected? set ~human_{shoulder,elbow,wrist}_frame.',
+                    self.base_frame, fr)
+                return []
+            t = tr.transform.translation
+            out.append((t.x, t.y, t.z))
+        return out
+
     def _publish_ee_marker(self):
         array = MarkerArray()
 
         if self.show_arm:
-            for base_id, key, rgba in ((30, 'arm_points', (0.0, 0.9, 0.9, 1.0)),
-                                       (33, 'arm_points_fk', (1.0, 0.3, 0.9, 1.0))):
-                array.markers.extend(self._arm_markers(base_id, self._arm[key],
-                                                       rgba))
+            # cyan: pipeline TF frames (real shoulder anchor)
+            array.markers.extend(self._stick(30, self.base_frame,
+                                             self._arm_tf_points(),
+                                             (0.0, 0.9, 0.9, 1.0)))
+            # magenta: FK of q_h,l1,l2, in the shoulder frame it was
+            # published in
+            fk = self._arm_fk
+            fk_pts = ([(p.position.x, p.position.y, p.position.z)
+                       for p in fk.poses[:3]] if fk and len(fk.poses) >= 3
+                      else [])
+            array.markers.extend(self._stick(
+                32, (fk.header.frame_id if fk else self.base_frame),
+                fk_pts, (1.0, 0.3, 0.9, 1.0)))
 
         if self.x_actual is None:
             self.viz_pub.publish(array)
@@ -236,37 +307,6 @@ class RvizVisualizationNode(object):
             array.markers.append(self._eta_text_marker(self.x_actual))
 
         self.viz_pub.publish(array)
-
-    def _arm_markers(self, base_id, pa, rgba):
-        """Shoulder/elbow/wrist of a PoseArray as a LINE_STRIP + a
-        SPHERE_LIST, in the PoseArray's own frame. Empty (DELETE) until
-        a message with 3 poses arrives."""
-        line = Marker()
-        line.header = self._header()
-        line.ns = 'sc_ros_empathic'
-        line.id = base_id
-        line.type = Marker.LINE_STRIP
-        pts = Marker()
-        pts.header = self._header()
-        pts.ns = 'sc_ros_empathic'
-        pts.id = base_id + 1
-        pts.type = Marker.SPHERE_LIST
-        if pa is None or len(pa.poses) < 3:
-            line.action = pts.action = Marker.DELETE
-            return [line, pts]
-        line.header.frame_id = pts.header.frame_id = (
-            pa.header.frame_id or self.base_frame)
-        line.action = pts.action = Marker.ADD
-        line.pose.orientation.w = pts.pose.orientation.w = 1.0
-        line.scale.x = 0.008
-        pts.scale.x = pts.scale.y = pts.scale.z = 0.025
-        line.color = ColorRGBA(*rgba)
-        pts.color = ColorRGBA(*rgba)
-        for p in pa.poses[:3]:
-            q = Point(x=p.position.x, y=p.position.y, z=p.position.z)
-            line.points.append(q)
-            pts.points.append(q)
-        return [line, pts]
 
     def _arrow_marker(self, mid, origin, vec, rgba):
         a = Marker()

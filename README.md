@@ -133,8 +133,8 @@ in the Views panel for free rotation. In that array:
 | amber line | LINE_STRIP | trajectory actually followed (EE trail; `trail_len:=0` disables) |
 | **green / blue / red arrows** at the EE | ARROW | **`v_h` / `v_r` / `v_s`**, length = `vel_arrow_gain` m per m/s (`show_vel_arrows:=false` hides them) |
 | white text above the EE | TEXT_VIEW_FACING | **`eta_h` / `eta_r` / `eta_s`** live values (`show_eta_text:=false` hides it) |
-| **cyan 3-segment stick** | SPHERE_LIST + LINE_STRIP | human **shoulder / elbow / wrist** from the pipeline (`~diag/arm_points`, its own frame) -- a live stick here = the human is being detected |
-| **magenta 3-segment stick** | SPHERE_LIST + LINE_STRIP | same, from **FK of `q_h`, `l1`, `l2`** (`~diag/arm_points_fk`), anchored at `human_shoulder_xyz` (approx; shape + motion are the check). `show_arm:=false` hides both. |
+| **cyan 3-segment stick** | SPHERE_LIST + LINE_STRIP | human **shoulder / elbow / wrist** looked up from the pipeline's **TF frames** (`~human_shoulder_frame` / `~human_elbow_frame` / `~human_wrist_frame`) -- coincides with the points' own frames, starts at the real shoulder. A live stick = the human is being detected. |
+| **magenta 3-segment stick** | SPHERE_LIST + LINE_STRIP | same joints from **FK of `q_h`, `l1`, `l2`** (`~diag/arm_points_fk`), published in `~human_shoulder_frame` so it shares the shoulder anchor -- divergence from the cyan stick is a consistency check. `show_arm:=false` hides both; needs `tf2_ros`. |
 
 RViz cannot plot a scalar over time -- for the **efficiency / factor
 time series** use `rqt_plot`:
@@ -435,8 +435,8 @@ Pass as `arg:=value`. Anything not listed lives in
 | `show_vel_arrows` | `true` | `v_h`/`v_r`/`v_s` as arrows at the EE. |
 | `show_eta_text` | `true` | `eta_h`/`eta_r`/`eta_s` as floating text. |
 | `vel_arrow_gain` | `2.0` | arrow length, m per m/s. |
-| `show_arm` | `true` | human shoulder/elbow/wrist stick (pipeline cyan + FK magenta). |
-| `human_shoulder_xyz` | `0.75 0.0 0.6` | anchor for the FK arm (`human_shoulder` static TF), `"x y z"` in the base frame. |
+| `show_arm` | `true` | human shoulder/elbow/wrist stick (pipeline TF cyan + FK magenta). |
+| `human_shoulder_frame` / `human_elbow_frame` / `human_wrist_frame` | `base_shoulder` / `RightForeArm` / `RightHand` | the pipeline's TF frame names for the arm joints -- **confirm** with `rosrun tf2_tools view_frames`. |
 | `config` | `.../config/shared_control.yaml` | parameter file loaded first (args above override it). |
 
 ### Condition F -- `baseline_aan.launch`

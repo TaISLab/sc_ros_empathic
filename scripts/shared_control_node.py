@@ -183,6 +183,11 @@ class SharedControlNode(object):
             '~human_arm_points_topic', '/right_arm/arm_points')
         self.human_points_frame = rospy.get_param(
             '~human_points_frame', 'fr3_link0')  # set to the pipeline's frame
+        # ~diag/arm_points_fk (FK of q_h,l1,l2; shoulder at the origin)
+        # is published in this frame -- set it to the pipeline's shoulder
+        # TF frame so RViz anchors the FK arm at the real shoulder.
+        self.arm_fk_frame = rospy.get_param(
+            '~human_shoulder_frame', 'base_shoulder')
         self.eta_topic = rospy.get_param('~eta_topic', '~eta')
 
         self.base_frame = rospy.get_param('~base_frame', 'fr3_link0')
@@ -783,7 +788,7 @@ class SharedControlNode(object):
                 and (stamp - self.q_h_stamp).to_sec() <= self.max_human_state_age):
             sh, el, wr = human_arm_points(self.q_h, l1_cur, l2_cur)
             self.diag['arm_points_fk'].publish(
-                self._pose_array((sh, el, wr), 'human_shoulder', stamp))
+                self._pose_array((sh, el, wr), self.arm_fk_frame, stamp))
 
     # ------------------------------------------------------------
     # CSV log (one row per cycle; analysis without the rosbag)
