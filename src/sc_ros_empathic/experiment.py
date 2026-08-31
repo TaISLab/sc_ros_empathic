@@ -182,8 +182,21 @@ def joint_margins(q_human, joint_limits=None):
     joint_limits = np.asarray(joint_limits, dtype=float)
     q = np.asarray(q_human, dtype=float)
 
-    q_mid = 0.5 * (joint_limits[:, 0] + joint_limits[:, 1])
-    q_half_range = 0.5 * (joint_limits[:, 1] - joint_limits[:, 0])
-    rho = (q - q_mid) / q_half_range
+    rho = joint_rho(q, joint_limits)
     margins = 1.0 - np.abs(rho)
     return margins, float(np.min(margins))
+
+
+def joint_rho(q_human, joint_limits=None):
+    """Per-joint normalized position rho_i = (q_i - q_mid_i) /
+    (0.5 (q_max_i - q_min_i)) in [-1, 1] (0 = mid-range, +-1 = at a
+    limit, |rho| > 1 = outside). This is the SAME rho the joint-safety
+    factor uses -- exposed so a viewer / log can show each joint
+    against its limits and check the factor against it."""
+    if joint_limits is None:
+        joint_limits = DEFAULT_JOINT_LIMITS
+    jl = np.asarray(joint_limits, dtype=float)
+    q = np.asarray(q_human, dtype=float)
+    q_mid = 0.5 * (jl[:, 0] + jl[:, 1])
+    q_half = 0.5 * (jl[:, 1] - jl[:, 0])
+    return (q - q_mid) / q_half

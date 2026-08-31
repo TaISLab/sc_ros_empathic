@@ -22,6 +22,12 @@ Minimal RViz visualization for the shared-control experiment:
   * eta_h / eta_r / eta_s as a floating TEXT marker above the EE (from
     ~eta). Disable with ~show_eta_text:=false. For a time plot use
     rqt_plot, not RViz.
+  * Per-joint gauges (from ~diag/joint_rho / joint_margins /
+    joint_limits): each human joint q_i on a bar from q_min to q_max
+    with a marker at the current value, coloured by margin -- a live
+    check of what the joint-safety efficiency is computed from.
+    ~show_joint_gauges:=false hides them; ~joint_gauge_origin places
+    them.
 
 The human arm is NOT drawn here: the visuo-tactile pipeline already
 publishes it (/skeleton_3D/connectors marker, /skeleton_3D/keypoints
@@ -72,9 +78,19 @@ class RvizVisualizationNode(object):
         self.show_vel_arrows = bool(rospy.get_param('~show_vel_arrows', True))
         self.show_eta_text = bool(rospy.get_param('~show_eta_text', True))
         self.vel_arrow_gain = float(rospy.get_param('~vel_arrow_gain', 2.0))
+        # Per-joint gauges: each human joint on a bar from q_min to
+        # q_max, a marker at q_i, coloured by margin -- a live check of
+        # what the joint-safety efficiency is computed from.
+        self.show_joint_gauges = bool(rospy.get_param('~show_joint_gauges', True))
+        self.gauge_origin = rospy.get_param('~joint_gauge_origin',
+                                            [0.18, 0.18, 0.45])
+        self.gauge_len = float(rospy.get_param('~joint_gauge_len', 0.12))
         sc = rospy.get_param('~sc_node', '/shared_control_node')
         self._v = {'v_h': None, 'v_r': None, 'v_s': None}
         self._eta = None
+        self._jrho = None
+        self._jmargin = None
+        self._jlim = None
 
         self.x_actual = None
 
@@ -87,6 +103,16 @@ class RvizVisualizationNode(object):
             rospy.Subscriber(sc + '/diag/v_s', Vector3Stamped, self._vs_cb, queue_size=1)
         if self.show_eta_text:
             rospy.Subscriber(sc + '/eta', Float64MultiArray, self._eta_cb, queue_size=1)
+        if self.show_joint_gauges:
+            rospy.Subscriber(sc + '/diag/joint_rho', Float64MultiArray,
+                              lambda m: setattr(self, '_jrho', list(m.data)),
+                              queue_size=1)
+            rospy.Subscriber(sc + '/diag/joint_margins', Float64MultiArray,
+                              lambda m: setattr(self, '_jmargin', list(m.data)),
+                              queue_size=1)
+            rospy.Subscriber(sc + '/diag/joint_limits', Float64MultiArray,
+                              lambda m: setattr(self, '_jlim', list(m.data)),
+                              queue_size=1)
 
         # The path itself is static: republish it at a slow rate so a
         # late-joining RViz instance still picks it up without needing
@@ -164,10 +190,95 @@ class RvizVisualizationNode(object):
             d.points.append(Point(x=p1[0], y=p1[1], z=p1[2]))
         return d
 
+    def _joint_gauge_markers(self):
+        """Per-joint bar (q_min..q_max) with a marker at q_i and a
+        text label. Uses ~diag/joint_rho (position in [-1,1]),
+        joint_margins (colour) and joint_limits (label numbers)."""
+        out = []
+        rho = self._jrho or []
+        if not rho:
+            for i in range(4):                      # nothing yet -> clear
+                for off in (0, 1, 2):
+                    m = Marker()
+                    m.header = self._header()
+                    m.ns = 'sc_ros_empathic'
+                    m.id = 40 + 3 * i + off
+                    m.action = Marker.DELETE
+                    out.append(m)
+            return out
+        margin = self._jmargin or [1.0] * 4
+        lim = self._jlim or []
+        ox, oy, oz = (float(self.gauge_origin[0]), float(self.gauge_origin[1]),
+                      float(self.gauge_origin[2]))
+        L = self.gauge_len
+        dy = 0.035
+        for i in range(min(4, len(rho))):
+            y = oy - i * dy
+            r = max(-1.2, min(1.2, float(rho[i])))
+            mrg = float(margin[i]) if i < len(margin) else 1.0
+            col = ((0.1, 0.9, 0.1, 1.0) if mrg > 0.3 else
+                   (1.0, 0.85, 0.0, 1.0) if mrg > 0.1 else (1.0, 0.1, 0.1, 1.0))
+
+            bar = Marker()
+            bar.header = self._header()
+            bar.ns = 'sc_ros_empathic'
+            bar.id = 40 + 3 * i
+            bar.type = Marker.LINE_STRIP
+            bar.action = Marker.ADD
+            bar.pose.orientation.w = 1.0
+            bar.scale.x = 0.004
+            bar.color = ColorRGBA(0.6, 0.6, 0.6, 1.0)
+            for xx in (ox, ox + 0.15 * L, ox + 0.5 * L, ox + 0.85 * L, ox + L):
+                bar.points.append(Point(x=xx, y=y, z=oz))
+            out.append(bar)
+
+            cur = Marker()
+            cur.header = self._header()
+            cur.ns = 'sc_ros_empathic'
+            cur.id = 40 + 3 * i + 1
+            cur.type = Marker.CUBE
+            cur.action = Marker.ADD
+            cur.pose.position.x = ox + 0.5 * (r + 1.0) * L
+            cur.pose.position.y = y
+            cur.pose.position.z = oz
+            cur.pose.orientation.w = 1.0
+            cur.scale.x = 0.006
+            cur.scale.y = 0.018
+            cur.scale.z = 0.018
+            cur.color = ColorRGBA(*col)
+            out.append(cur)
+
+            txt = Marker()
+            txt.header = self._header()
+            txt.ns = 'sc_ros_empathic'
+            txt.id = 40 + 3 * i + 2
+            txt.type = Marker.TEXT_VIEW_FACING
+            txt.action = Marker.ADD
+            txt.pose.position.x = ox + L + 0.02
+            txt.pose.position.y = y
+            txt.pose.position.z = oz
+            txt.pose.orientation.w = 1.0
+            txt.scale.z = 0.02
+            txt.color = ColorRGBA(1.0, 1.0, 1.0, 1.0)
+            if len(lim) >= 2 * (i + 1):
+                qmid = 0.5 * (lim[2 * i] + lim[2 * i + 1])
+                qhalf = 0.5 * (lim[2 * i + 1] - lim[2 * i])
+                q = qmid + r * qhalf
+                txt.text = ('q%d %+.2f rad  [%.2f, %.2f]  m=%.2f'
+                            % (i + 1, q, lim[2 * i], lim[2 * i + 1], mrg))
+            else:
+                txt.text = 'q%d  rho %+.2f  m=%.2f' % (i + 1, r, mrg)
+            out.append(txt)
+        return out
+
     def _publish_ee_marker(self):
         array = MarkerArray()
 
+        if self.show_joint_gauges:
+            array.markers.extend(self._joint_gauge_markers())
+
         if self.x_actual is None:
+            self.viz_pub.publish(array)
             return
 
         s = Marker()

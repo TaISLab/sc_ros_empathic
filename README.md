@@ -134,6 +134,7 @@ On `/sc_ros_empathic/viz` (this package):
 | amber line | LINE_STRIP | trajectory actually followed (EE trail; `trail_len:=0` disables) |
 | **green / blue / red arrows** at the EE | ARROW | **`v_h` / `v_r` / `v_s`**, length = `vel_arrow_gain` m per m/s (`show_vel_arrows:=false` hides them) |
 | white text above the EE | TEXT_VIEW_FACING | **`eta_h` / `eta_r` / `eta_s`** live values (`show_eta_text:=false` hides it) |
+| 4 horizontal bars + labels | LINE_STRIP + CUBE + TEXT | **per-joint gauge**: each human joint `q_i` on a bar from `q_min_i` to `q_max_i`, marker at the current value, green/amber/red by margin. A live check of what `joint_safety` is computed from. `show_joint_gauges:=false` hides them; `joint_gauge_origin:="[x,y,z]"` moves them. |
 
 Plus the FR3 model, and the **human arm as the visuo-tactile pipeline
 publishes it** -- this package does not draw the arm: `/skeleton_3D/connectors`
@@ -149,6 +150,19 @@ rqt_plot /shared_control_node/eta/data[0]:data[1]:data[2]
 rqt_plot /shared_control_node/diag/factors_h/data[0]:data[1]:data[2]:data[3]
 rqt_plot /shared_control_node/diag/v_s/vector/x:y:z
 ```
+
+**Checking `joint_safety`** against the joints: `~diag/joint_rho` is the
+signed per-joint position `rho_i` in `[-1, 1]` (`0` mid-range, `+-1` at
+a limit) -- the exact quantity the factor penalises;
+`~diag/joint_margins` is `[m1..m4, min]` with `m_i = 1 - |rho_i|`.
+
+```bash
+rqt_plot /shared_control_node/diag/joint_margins/data[0]:data[1]:data[2]:data[3]:data[4] /shared_control_node/diag/factors_h/data[2]
+```
+
+When a joint's margin drops toward 0, `factors_h/data[2]`
+(`joint_safety`) must drop toward 0 too (it is `exp(-Cs * penalty)`).
+`~diag/joint_limits` is `[q1min,q1max,...,q4min,q4max]` (latched).
 
 ## Per-volunteer configuration
 
@@ -231,7 +245,8 @@ with `csv_path:=`. Columns:
 px..pz, vh_*, vr_*, vs_*, fx..fz`, `human_fresh` (0/1 -- fresh
 q_h + l1,l2 this cycle; `joint_safety_h` / `m*` are `NaN` when 0),
 `jac_fresh` (0/1), `eta_h, eta_r, eta_s, smoothness_h, directness_h,
-joint_safety_h, manip_h, m1..m4, m_min, w_qr` --
+joint_safety_h, manip_h, rho1..rho4` (signed joint position in
+`[-1,1]`), `m1..m4, m_min, w_qr` --
 everything the Sec. V-D metrics and the traced-path plots need,
 directly loadable with pandas (plot against `t_rel`). Flushed ~1x/s and
 closed cleanly on Ctrl-C. Independent of `record:=true`; use either or

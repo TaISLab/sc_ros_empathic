@@ -89,7 +89,8 @@ from sc_ros_empathic.path_follower import CirclePath, ReactivePathFollower
 from sc_ros_empathic.performance import manipulability_index
 from sc_ros_empathic.dh_utils import human_arm_points
 from sc_ros_empathic.experiment import (
-    resolve_condition, LapCounter, joint_margins, CONDITION_F_ID)
+    resolve_condition, LapCounter, joint_margins, joint_rho, CONDITION_F_ID)
+from sc_ros_empathic.performance import DEFAULT_JOINT_LIMITS
 from sc_ros_empathic.subject_config import SubjectConfig, SubjectConfigError
 
 
@@ -475,6 +476,13 @@ class SharedControlNode(object):
             'force': rospy.Publisher('~diag/force', Vector3Stamped, queue_size=1),
             'joint_margins': rospy.Publisher('~diag/joint_margins',
                                               Float64MultiArray, queue_size=1),
+            # signed per-joint position rho in [-1,1] (0 mid, +-1 limit)
+            'joint_rho': rospy.Publisher('~diag/joint_rho', Float64MultiArray,
+                                          queue_size=1),
+            # [q1min,q1max, ...q4min,q4max] (rad), latched
+            'joint_limits': rospy.Publisher('~diag/joint_limits',
+                                             Float64MultiArray, queue_size=1,
+                                             latch=True),
             'manipulability': rospy.Publisher('~diag/manipulability', Float64,
                                                queue_size=1),
             'path_progress': rospy.Publisher('~diag/path_progress',
@@ -499,6 +507,10 @@ class SharedControlNode(object):
         self.diag['factors_layout'].publish(
             String(data=','.join(FACTOR_SLOTS)))
         self.diag['arm_points_layout'].publish(String(data='shoulder,elbow,wrist'))
+        _jl = (self.human_joint_limits if self.human_joint_limits is not None
+               else DEFAULT_JOINT_LIMITS)
+        self.diag['joint_limits'].publish(Float64MultiArray(
+            data=[float(v) for row in np.asarray(_jl) for v in row]))
 
         rospy.Service('~tare', Empty, self._tare_srv)
 
@@ -540,6 +552,7 @@ class SharedControlNode(object):
                  'human_fresh', 'jac_fresh',
                  'eta_h', 'eta_r', 'eta_s',
                  'smoothness_h', 'directness_h', 'joint_safety_h', 'manip_h',
+                 'rho1', 'rho2', 'rho3', 'rho4',
                  'm1', 'm2', 'm3', 'm4', 'm_min', 'w_qr'])
             rospy.loginfo('shared_control_node: CSV log -> %s', csv_path)
             rospy.on_shutdown(self._close_csv)
@@ -772,6 +785,9 @@ class SharedControlNode(object):
                                                 self.human_joint_limits)
             self.diag['joint_margins'].publish(Float64MultiArray(
                 data=list(map(float, margins)) + [float(min_margin)]))
+            self.diag['joint_rho'].publish(Float64MultiArray(
+                data=[float(r) for r in joint_rho(self.q_h,
+                                                  self.human_joint_limits)]))
 
         if self.manipulability_available and self.J_robot is not None:
             self.diag['manipulability'].publish(
@@ -796,10 +812,12 @@ class SharedControlNode(object):
     def _write_csv_row(self, stamp, s_near, lap, cross_track, v_r, v_s,
                         factors_h, eta_h, eta_r, eta_s, human_fresh, jac_fresh,
                         l1_cur, l2_cur):
-        m = [float('nan')] * 5
+        m = [float('nan')] * 9   # rho1..4, m1..4, m_min
         if human_fresh and self.q_h is not None:
             margins, mmin = joint_margins(self.q_h, self.human_joint_limits)
-            m = list(map(float, margins)) + [float(mmin)]
+            rho = joint_rho(self.q_h, self.human_joint_limits)
+            m = ([float(r) for r in rho] + list(map(float, margins))
+                 + [float(mmin)])
         w = float('nan')
         if self.J_robot is not None:
             w = float(manipulability_index(self.J_robot))

@@ -107,6 +107,7 @@
   <arg name="show_vel_arrows" default="true"/>  <!-- v_h/v_r/v_s as arrows at the EE -->
   <arg name="show_eta_text"   default="true"/>  <!-- eta_h/eta_r/eta_s as floating text -->
   <arg name="vel_arrow_gain"  default="2.0"/>   <!-- metres of arrow per m/s -->
+  <arg name="show_joint_gauges" default="true"/>  <!-- per-joint q vs [min,max] bars in RViz -->
   <!-- Frame that ~diag/arm_points_fk (FK of q_h,l1,l2) is published in.
        The human arm itself is drawn by the pipeline, not this package. -->
   <arg name="human_shoulder_frame" default="base_shoulder"/>
@@ -210,6 +211,7 @@
     <param name="show_vel_arrows" value="$(arg show_vel_arrows)"/>
     <param name="show_eta_text"   value="$(arg show_eta_text)"/>
     <param name="vel_arrow_gain"  value="$(arg vel_arrow_gain)"/>
+    <param name="show_joint_gauges" value="$(arg show_joint_gauges)"/>
     <param name="sc_node" value="/shared_control_node"/>
   </node>
 
@@ -242,6 +244,8 @@
               /shared_control_node/diag/v_s
               /shared_control_node/diag/force
               /shared_control_node/diag/joint_margins
+              /shared_control_node/diag/joint_rho
+              /shared_control_node/diag/joint_limits
               /shared_control_node/diag/manipulability
               /shared_control_node/diag/path_progress
               /shared_control_node/diag/arm_points
