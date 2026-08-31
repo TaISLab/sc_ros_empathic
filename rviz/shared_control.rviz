@@ -1,10 +1,10 @@
 # RViz config for sc_ros_empathic: the circle to trace (outline + disc),
-# the end-effector + its trail, the v_h/v_r/v_s arrows and the eta text,
-# plus the FR3 TF tree. Default view is TopDownOrtho, looking straight
-# down onto the (horizontal) circle plane, centred on the nominal
-# centre [0.45, 0] and rotated so robot +X points DOWN on screen;
-# a "3D Orbit" view is saved for free rotation.
-# roslaunch loads it via  rviz -d $(find sc_ros_empathic)/rviz/shared_control.rviz
+# the end-effector + its trail, the v_h/v_r/v_s arrows and the eta text
+# (all on /sc_ros_empathic/viz), the FR3 model, and the human arm as the
+# visuo-tactile pipeline already publishes it (/skeleton_3D/connectors,
+# /skeleton_3D/keypoints, /right_arm_description). Fixed Frame base_link.
+# Default view is TopDownOrtho on the circle plane; a 3D Orbit is saved.
+# Loaded by the launch:  rviz -d $(find sc_ros_empathic)/rviz/shared_control.rviz
 Panels:
   - Class: rviz/Displays
     Name: Displays
@@ -26,11 +26,40 @@ Visualization Manager:
       Reference Frame: <Fixed Frame>
     - Class: rviz/TF
       Name: TF
-      Enabled: true
+      Enabled: false
       Marker Scale: 0.3
       Show Arrows: false
       Show Axes: true
       Show Names: false
+    - Class: rviz/RobotModel
+      Name: FR3
+      Enabled: true
+      Robot Description: robot_description
+      Visual Enabled: true
+      Collision Enabled: false
+    - Class: rviz/RobotModel
+      Name: Right Arm URDF
+      Enabled: true
+      Robot Description: /right_arm_description
+      Visual Enabled: true
+      Collision Enabled: false
+      Alpha: 0.8
+    - Class: rviz/Marker
+      Name: skeleton connectors
+      Enabled: true
+      Marker Topic: /skeleton_3D/connectors
+      Queue Size: 100
+    - Class: rviz/PointCloud
+      Name: skeleton keypoints
+      Enabled: true
+      Topic: /skeleton_3D/keypoints
+      Style: Spheres
+      Size (m): 0.03
+      Color: 0; 230; 230
+      Color Transformer: FlatColor
+      Position Transformer: XYZ
+      Use Fixed Frame: true
+      Queue Size: 10
     - Class: rviz/MarkerArray
       Name: MarkerArray
       Enabled: true
@@ -38,7 +67,7 @@ Visualization Manager:
       Queue Size: 10
   Global Options:
     Background Color: 48; 48; 48
-    Fixed Frame: fr3_link0
+    Fixed Frame: base_link
     Frame Rate: 30
   Name: root
   Tools:

@@ -119,12 +119,13 @@ chosen direction (laps completed the intended way count up).
 
 ## What RViz shows
 
-`rviz:=true` loads `rviz/shared_control.rviz` (Fixed Frame `fr3_link0`,
-one MarkerArray display on `/sc_ros_empathic/viz`). The default view is
-**top-down orthographic**, looking straight down onto the horizontal
-circle plane and centred on the nominal centre `[0.45, 0]` -- the same
-x-y view as the paper's traced-path figures; a "3D Orbit" view is saved
-in the Views panel for free rotation. In that array:
+`rviz:=true` loads `rviz/shared_control.rviz` (Fixed Frame `base_link`).
+The default view is **top-down orthographic**, looking straight down
+onto the horizontal circle plane and centred on the nominal centre
+`[0.45, 0]` -- the same x-y view as the paper's traced-path figures; a
+"3D Orbit" view is saved in the Views panel for free rotation.
+
+On `/sc_ros_empathic/viz` (this package):
 
 | element | marker | meaning |
 |---|---|---|
@@ -133,8 +134,12 @@ in the Views panel for free rotation. In that array:
 | amber line | LINE_STRIP | trajectory actually followed (EE trail; `trail_len:=0` disables) |
 | **green / blue / red arrows** at the EE | ARROW | **`v_h` / `v_r` / `v_s`**, length = `vel_arrow_gain` m per m/s (`show_vel_arrows:=false` hides them) |
 | white text above the EE | TEXT_VIEW_FACING | **`eta_h` / `eta_r` / `eta_s`** live values (`show_eta_text:=false` hides it) |
-| **cyan polyline** | SPHERE_LIST + LINE_STRIP | the human arm: shoulder->elbow->wrist keypoints. `human_arm_source:=topic` (default) reads `human_arm_topic` (`/right_arm/kp_URDF`, type `human_arm_msg_type` = `upper_limb_kinematics/KP_URDF`, imported at runtime) and finds each `human_arm_keys` point reflectively; `:=tf` uses `human_arm_frames`. A live polyline = the human is being detected. `show_arm:=false` hides it. |
-| magenta polyline (opt-in) | SPHERE_LIST + LINE_STRIP | `show_arm_fk:=true`: **FK of `q_h`, `l1`, `l2`** (`~diag/arm_points_fk`). OFF by default -- its elbow/wrist depend on the pipeline's shoulder-frame orientation convention, so it can diverge even when the human is tracked fine. |
+
+Plus the FR3 model, and the **human arm as the visuo-tactile pipeline
+publishes it** -- this package does not draw the arm: `/skeleton_3D/connectors`
+(`Marker`), `/skeleton_3D/keypoints` (`PointCloud`), and the
+`/right_arm_description` URDF (`RobotModel`). A live skeleton = the
+human is being detected.
 
 RViz cannot plot a scalar over time -- for the **efficiency / factor
 time series** use `rqt_plot`:
@@ -435,14 +440,7 @@ Pass as `arg:=value`. Anything not listed lives in
 | `show_vel_arrows` | `true` | `v_h`/`v_r`/`v_s` as arrows at the EE. |
 | `show_eta_text` | `true` | `eta_h`/`eta_r`/`eta_s` as floating text. |
 | `vel_arrow_gain` | `2.0` | arrow length, m per m/s. |
-| `show_arm` | `true` | human arm polyline in RViz. |
-| `show_arm_fk` | `false` | also overlay the FK arm (`~diag/arm_points_fk`). |
-| `human_arm_source` | `topic` | `topic` (keypoints in `human_arm_topic`) \| `tf` (`human_arm_frames`). |
-| `human_arm_topic` | `/right_arm/kp_URDF` | keypoints topic. |
-| `human_arm_msg_type` | `upper_limb_kinematics/KP_URDF` | its message type (imported at runtime; the node needs no build dep on it). |
-| `human_arm_keys` | `[right_shoulder, right_elbow, right_wrist]` | keypoint names, shoulder..wrist. |
-| `human_arm_frames` | `[]` | TF frame names, shoulder..wrist (for `human_arm_source:=tf`). |
-| `human_shoulder_frame` | `base_shoulder` | frame `~diag/arm_points_fk` is published in (`source:=tf`). |
+| `human_shoulder_frame` | `base_shoulder` | frame `~diag/arm_points_fk` (FK of `q_h,l1,l2`, a recorded consistency signal) is published in. |
 | `config` | `.../config/shared_control.yaml` | parameter file loaded first (args above override it). |
 
 ### Condition F -- `baseline_aan.launch`

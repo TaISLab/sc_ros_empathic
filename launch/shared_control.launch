@@ -107,19 +107,8 @@
   <arg name="show_vel_arrows" default="true"/>  <!-- v_h/v_r/v_s as arrows at the EE -->
   <arg name="show_eta_text"   default="true"/>  <!-- eta_h/eta_r/eta_s as floating text -->
   <arg name="vel_arrow_gain"  default="2.0"/>   <!-- metres of arrow per m/s -->
-  <arg name="show_arm"    default="true"/>   <!-- human arm polyline in RViz -->
-  <arg name="show_arm_fk" default="false"/>  <!-- also overlay the FK arm -->
-  <!-- Human shoulder/elbow/wrist keypoints for the RViz polyline.
-       source 'topic': keypoints in human_arm_topic, message type
-       human_arm_msg_type (imported by name at runtime; the point for
-       each human_arm_keys name is found reflectively). source 'tf':
-       origins of human_arm_frames. -->
-  <arg name="human_arm_source"   default="topic"/>       <!-- topic | tf -->
-  <arg name="human_arm_topic"    default="/right_arm/kp_URDF"/>
-  <arg name="human_arm_msg_type" default="upper_limb_kinematics/KP_URDF"/>
-  <arg name="human_arm_keys"     default="[right_shoulder, right_elbow, right_wrist]"/>
-  <arg name="human_arm_frames"   default="[]"/>          <!-- source:=tf -->
-  <!-- Shoulder frame ~diag/arm_points_fk is published in (source:=tf). -->
+  <!-- Frame that ~diag/arm_points_fk (FK of q_h,l1,l2) is published in.
+       The human arm itself is drawn by the pipeline, not this package. -->
   <arg name="human_shoulder_frame" default="base_shoulder"/>
   <arg name="rviz_config" default="$(find sc_ros_empathic)/rviz/shared_control.rviz"/>
 
@@ -221,13 +210,6 @@
     <param name="show_vel_arrows" value="$(arg show_vel_arrows)"/>
     <param name="show_eta_text"   value="$(arg show_eta_text)"/>
     <param name="vel_arrow_gain"  value="$(arg vel_arrow_gain)"/>
-    <param name="show_arm"        value="$(arg show_arm)"/>
-    <param name="show_arm_fk"     value="$(arg show_arm_fk)"/>
-    <param name="human_arm_source"   value="$(arg human_arm_source)"/>
-    <param name="human_arm_topic"    value="$(arg human_arm_topic)"/>
-    <param name="human_arm_msg_type" value="$(arg human_arm_msg_type)"/>
-    <rosparam param="human_arm_keys"   subst_value="true">$(arg human_arm_keys)</rosparam>
-    <rosparam param="human_arm_frames" subst_value="true">$(arg human_arm_frames)</rosparam>
     <param name="sc_node" value="/shared_control_node"/>
   </node>
 
