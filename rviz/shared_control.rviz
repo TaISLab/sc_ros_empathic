@@ -1,10 +1,10 @@
-# RViz config for sc_ros_empathic: the circle to trace (outline + disc),
-# the end-effector + its trail, the v_h/v_r/v_s arrows and the eta text
-# (all on /sc_ros_empathic/viz), the FR3 model, and the human arm as the
-# visuo-tactile pipeline already publishes it (/skeleton_3D/connectors,
-# /skeleton_3D/keypoints, /right_arm_description). Fixed Frame base_link.
-# Default view is TopDownOrtho on the circle plane; a 3D Orbit is saved.
-# Loaded by the launch:  rviz -d $(find sc_ros_empathic)/rviz/shared_control.rviz
+# RViz config for sc_ros_empathic. On /sc_ros_empathic/viz: the circle
+# to trace (outline + disc), the EE + its trail, the v_h/v_r/v_s arrows
+# and the eta text. Plus the human arm as the visuo-tactile pipeline
+# publishes it (/skeleton_3D/connectors, /skeleton_3D/keypoints,
+# /right_arm_description). The FR3 model is included but DISABLED (it
+# hides the task); enable it in the Displays panel if you want it.
+# Fixed Frame base_link. Default view: top-down on the circle plane.
 Panels:
   - Class: rviz/Displays
     Name: Displays
@@ -17,56 +17,100 @@ Panels:
 Visualization Manager:
   Class: ""
   Displays:
-    - Class: rviz/Grid
-      Name: Grid
-      Enabled: true
+    - Alpha: 0.5
       Cell Size: 0.1
-      Plane Cell Count: 20
+      Class: rviz/Grid
       Color: 160; 160; 164
+      Enabled: true
+      Line Style:
+        Line Width: 0.03
+        Value: Lines
+      Name: Grid
+      Normal Cell Count: 0
+      Offset: {X: 0, Y: 0, Z: 0}
+      Plane: XY
+      Plane Cell Count: 20
       Reference Frame: <Fixed Frame>
+      Value: true
     - Class: rviz/TF
       Name: TF
       Enabled: false
-      Marker Scale: 0.3
+      Marker Scale: 0.2
       Show Arrows: false
       Show Axes: true
-      Show Names: false
-    - Class: rviz/RobotModel
-      Name: FR3
-      Enabled: true
+      Show Names: true
+      Update Interval: 0
+      Value: false
+    - Alpha: 1
+      Class: rviz/RobotModel
+      Collision Enabled: false
+      Enabled: false
+      Name: Franka FR3 Model
       Robot Description: robot_description
+      TF Prefix: ""
+      Update Interval: 0
+      Value: false
       Visual Enabled: true
-      Collision Enabled: false
-    - Class: rviz/RobotModel
-      Name: Right Arm URDF
+    - Class: rviz/Group
+      Name: skeleton_3d
       Enabled: true
-      Robot Description: /right_arm_description
-      Visual Enabled: true
-      Collision Enabled: false
-      Alpha: 0.8
-    - Class: rviz/Marker
-      Name: skeleton connectors
+      Displays:
+        - Class: rviz/Marker
+          Name: connectors
+          Enabled: true
+          Marker Topic: /skeleton_3D/connectors
+          Queue Size: 100
+          Value: true
+        - Alpha: 1
+          Autocompute Intensity Bounds: true
+          Autocompute Value Bounds: {Max Value: 10, Min Value: -10, Value: true}
+          Axis: Z
+          Channel Name: intensity
+          Class: rviz/PointCloud
+          Color: 0; 230; 230
+          Color Transformer: FlatColor
+          Decay Time: 0
+          Enabled: true
+          Invert Rainbow: false
+          Max Color: 255; 255; 255
+          Min Color: 0; 0; 0
+          Name: keypoints
+          Position Transformer: XYZ
+          Queue Size: 10
+          Selectable: true
+          Size (Pixels): 3
+          Size (m): 0.03
+          Style: Spheres
+          Topic: /skeleton_3D/keypoints
+          Unreliable: false
+          Use Fixed Frame: true
+          Use rainbow: false
+          Value: true
+      Value: true
+    - Class: rviz/Group
+      Name: human_description
       Enabled: true
-      Marker Topic: /skeleton_3D/connectors
-      Queue Size: 100
-    - Class: rviz/PointCloud
-      Name: skeleton keypoints
-      Enabled: true
-      Topic: /skeleton_3D/keypoints
-      Style: Spheres
-      Size (m): 0.03
-      Color: 0; 230; 230
-      Color Transformer: FlatColor
-      Position Transformer: XYZ
-      Use Fixed Frame: true
-      Queue Size: 10
+      Displays:
+        - Alpha: 0.8
+          Class: rviz/RobotModel
+          Collision Enabled: false
+          Enabled: true
+          Name: Right Arm URDF
+          Robot Description: /right_arm_description
+          TF Prefix: ""
+          Update Interval: 0
+          Value: true
+          Visual Enabled: true
+      Value: true
     - Class: rviz/MarkerArray
       Name: MarkerArray
       Enabled: true
       Marker Topic: /sc_ros_empathic/viz
       Queue Size: 10
+      Value: true
   Global Options:
     Background Color: 48; 48; 48
+    Default Light: true
     Fixed Frame: base_link
     Frame Rate: 30
   Name: root
@@ -85,17 +129,14 @@ Visualization Manager:
       X: 0.45
       Y: 0.0
       Scale: 1400
-      Angle: 1.5708            # rotate so robot +X points DOWN on screen
+      Angle: 1.5708
       Invert Z Axis: false
       Near Clip Distance: 0.01
     Saved:
       - Class: rviz/Orbit
         Name: 3D Orbit
         Distance: 1.2
-        Focal Point:
-          X: 0.45
-          Y: 0.0
-          Z: 0.45
+        Focal Point: {X: 0.45, Y: 0.0, Z: 0.45}
         Pitch: 0.6
         Yaw: 0.9
         Near Clip Distance: 0.01
