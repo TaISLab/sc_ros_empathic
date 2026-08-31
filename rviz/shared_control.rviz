@@ -4,7 +4,9 @@
 # publishes it (/skeleton_3D/connectors, /skeleton_3D/keypoints,
 # /right_arm_description). The FR3 model is included but DISABLED (it
 # hides the task); enable it in the Displays panel if you want it.
-# Fixed Frame base_link. Default view: top-down on the circle plane.
+# Fixed Frame base_link. Default view: 3D orbit framing the circle,
+# the FR3 and the human (who sits ~0.5 m in +Y); a tight top-down on
+# the circle plane is saved in the Views panel.
 Panels:
   - Class: rviz/Displays
     Name: Displays
@@ -123,22 +125,22 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Class: rviz/TopDownOrtho
-      Name: Top-down (circle plane)
-      Target Frame: <Fixed Frame>
-      X: 0.45
-      Y: 0.0
-      Scale: 1400
-      Angle: 1.5708
-      Invert Z Axis: false
+      Class: rviz/Orbit
+      Name: Scene (circle + FR3 + human)
+      Distance: 2.6
+      Focal Point: {X: 0.5, Y: 0.3, Z: 0.45}
+      Pitch: 0.65
+      Yaw: 0.9
       Near Clip Distance: 0.01
     Saved:
-      - Class: rviz/Orbit
-        Name: 3D Orbit
-        Distance: 1.2
-        Focal Point: {X: 0.45, Y: 0.0, Z: 0.45}
-        Pitch: 0.6
-        Yaw: 0.9
+      - Class: rviz/TopDownOrtho
+        Name: Top-down (circle plane)
+        Target Frame: <Fixed Frame>
+        X: 0.45
+        Y: 0.0
+        Scale: 1400
+        Angle: 1.5708
+        Invert Z Axis: false
         Near Clip Distance: 0.01
   Value: true
 Window Geometry:
