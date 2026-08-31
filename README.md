@@ -133,7 +133,7 @@ in the Views panel for free rotation. In that array:
 | amber line | LINE_STRIP | trajectory actually followed (EE trail; `trail_len:=0` disables) |
 | **green / blue / red arrows** at the EE | ARROW | **`v_h` / `v_r` / `v_s`**, length = `vel_arrow_gain` m per m/s (`show_vel_arrows:=false` hides them) |
 | white text above the EE | TEXT_VIEW_FACING | **`eta_h` / `eta_r` / `eta_s`** live values (`show_eta_text:=false` hides it) |
-| **cyan polyline** | SPHERE_LIST + LINE_STRIP | the human arm: a polyline through the pipeline's **arm-joint TF frames, in order** (`~human_arm_frames`) -- lands exactly on those frames. A live polyline = the human is being detected. `show_arm:=false` hides it; needs `tf2_ros`. |
+| **cyan polyline** | SPHERE_LIST + LINE_STRIP | the human arm: shoulder->elbow->wrist keypoints. `human_arm_source:=topic` (default) reads named keypoints from `human_arm_topic` (`/right_arm/kp_URDF`, assumed `visualization_msgs/MarkerArray`, name from `marker.ns`/`.text`), in the order `human_arm_keys` (`right_shoulder,right_elbow,right_wrist`); `:=tf` uses `human_arm_frames`. A live polyline = the human is being detected. `show_arm:=false` hides it. |
 | magenta polyline (opt-in) | SPHERE_LIST + LINE_STRIP | `show_arm_fk:=true`: **FK of `q_h`, `l1`, `l2`** (`~diag/arm_points_fk`). OFF by default -- its elbow/wrist depend on the pipeline's shoulder-frame orientation convention, so it can diverge even when the human is tracked fine. |
 
 RViz cannot plot a scalar over time -- for the **efficiency / factor
@@ -435,9 +435,13 @@ Pass as `arg:=value`. Anything not listed lives in
 | `show_vel_arrows` | `true` | `v_h`/`v_r`/`v_s` as arrows at the EE. |
 | `show_eta_text` | `true` | `eta_h`/`eta_r`/`eta_s` as floating text. |
 | `vel_arrow_gain` | `2.0` | arrow length, m per m/s. |
-| `show_arm` | `true` | human arm polyline through `human_arm_frames`. |
+| `show_arm` | `true` | human arm polyline in RViz. |
 | `show_arm_fk` | `false` | also overlay the FK arm (`~diag/arm_points_fk`). |
-| `human_arm_frames` | `[base_shoulder, RightUpperArm, RightForeArm, RightHand]` | the pipeline's arm-joint TF frames **in order** (shoulder..wrist) -- **confirm** with `rosrun tf2_tools view_frames`. First entry is also where `~diag/arm_points_fk` is published. |
+| `human_arm_source` | `topic` | `topic` (keypoints in `human_arm_topic`) \| `tf` (`human_arm_frames`). |
+| `human_arm_topic` | `/right_arm/kp_URDF` | keypoints topic (assumed `visualization_msgs/MarkerArray`). |
+| `human_arm_keys` | `[right_shoulder, right_elbow, right_wrist]` | keypoint names, shoulder..wrist. |
+| `human_arm_frames` | `[]` | TF frame names, shoulder..wrist (for `human_arm_source:=tf`). |
+| `human_shoulder_frame` | `base_shoulder` | frame `~diag/arm_points_fk` is published in (`source:=tf`). |
 | `config` | `.../config/shared_control.yaml` | parameter file loaded first (args above override it). |
 
 ### Condition F -- `baseline_aan.launch`

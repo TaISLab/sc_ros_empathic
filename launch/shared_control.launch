@@ -109,13 +109,16 @@
   <arg name="vel_arrow_gain"  default="2.0"/>   <!-- metres of arrow per m/s -->
   <arg name="show_arm"    default="true"/>   <!-- human arm polyline in RViz -->
   <arg name="show_arm_fk" default="false"/>  <!-- also overlay the FK arm -->
-  <!-- The visuo-tactile pipeline's arm-joint TF frames, IN ORDER
-       (shoulder .. wrist). CONFIRM the names with `rosrun tf2_tools
-       view_frames` or `rostopic echo /tf`; the defaults are a guess.
-       The cyan RViz polyline is looked up from these. -->
-  <arg name="human_arm_frames"
-       default="[base_shoulder, RightUpperArm, RightForeArm, RightHand]"/>
-  <!-- First entry = shoulder; ~diag/arm_points_fk is published in it. -->
+  <!-- Human shoulder/elbow/wrist keypoints for the RViz polyline.
+       source 'topic': named keypoints in human_arm_topic (assumed
+       visualization_msgs/MarkerArray; name from marker.ns/.text),
+       picked in the order human_arm_keys. source 'tf': origins of
+       human_arm_frames. -->
+  <arg name="human_arm_source" default="topic"/>       <!-- topic | tf -->
+  <arg name="human_arm_topic"  default="/right_arm/kp_URDF"/>
+  <arg name="human_arm_keys"   default="[right_shoulder, right_elbow, right_wrist]"/>
+  <arg name="human_arm_frames" default="[]"/>          <!-- source:=tf -->
+  <!-- Shoulder frame ~diag/arm_points_fk is published in (source:=tf). -->
   <arg name="human_shoulder_frame" default="base_shoulder"/>
   <arg name="rviz_config" default="$(find sc_ros_empathic)/rviz/shared_control.rviz"/>
 
@@ -217,8 +220,11 @@
     <param name="show_vel_arrows" value="$(arg show_vel_arrows)"/>
     <param name="show_eta_text"   value="$(arg show_eta_text)"/>
     <param name="vel_arrow_gain"  value="$(arg vel_arrow_gain)"/>
-    <param name="show_arm"    value="$(arg show_arm)"/>
-    <param name="show_arm_fk" value="$(arg show_arm_fk)"/>
+    <param name="show_arm"        value="$(arg show_arm)"/>
+    <param name="show_arm_fk"     value="$(arg show_arm_fk)"/>
+    <param name="human_arm_source" value="$(arg human_arm_source)"/>
+    <param name="human_arm_topic"  value="$(arg human_arm_topic)"/>
+    <rosparam param="human_arm_keys"   subst_value="true">$(arg human_arm_keys)</rosparam>
     <rosparam param="human_arm_frames" subst_value="true">$(arg human_arm_frames)</rosparam>
     <param name="sc_node" value="/shared_control_node"/>
   </node>

@@ -23,12 +23,13 @@ Minimal RViz visualization for the shared-control experiment:
     ~eta). Disable with ~show_eta_text:=false. For a time plot use
     rqt_plot, not RViz.
   * The human arm as a SPHERE_LIST + LINE_STRIP polyline (cyan) through
-    the pipeline's own arm TF frames, in order (~human_arm_frames), so
-    it lands exactly on those frames. A live polyline = the human is
-    being detected. ~show_arm:=false hides it; needs tf2_ros. Optional
-    magenta ~diag/arm_points_fk overlay with ~show_arm_fk:=true (FK of
-    q_h,l1,l2 -- OFF by default: its elbow/wrist depend on the
-    pipeline's shoulder-frame orientation convention).
+    the pipeline's shoulder/elbow/wrist keypoints, in order. Source:
+    ~human_arm_source = 'topic' (default: named keypoints in
+    ~human_arm_topic, assumed visualization_msgs/MarkerArray, picked by
+    ~human_arm_keys) or 'tf' (origins of ~human_arm_frames, needs
+    tf2_ros). A live polyline = the human is being detected.
+    ~show_arm:=false hides it. Optional magenta ~diag/arm_points_fk
+    overlay with ~show_arm_fk:=true.
 
 Publishes a single visualization_msgs/MarkerArray to ~viz_topic
 (default /sc_ros_empathic/viz -- an ABSOLUTE name so it does not depend
@@ -76,32 +77,41 @@ class RvizVisualizationNode(object):
         self.show_vel_arrows = bool(rospy.get_param('~show_vel_arrows', True))
         self.show_eta_text = bool(rospy.get_param('~show_eta_text', True))
         self.vel_arrow_gain = float(rospy.get_param('~vel_arrow_gain', 2.0))
-        # Human arm stick: a polyline through the pipeline's own TF
-        # frames, in order (~human_arm_frames), so it coincides exactly
-        # with those frames. List whatever chain the pipeline publishes
-        # (shoulder .. wrist); 2+ frames. Secondary: ~diag/arm_points_fk
-        # (FK of q_h,l1,l2) -- OFF by default because its elbow/wrist
-        # depend on the pipeline's shoulder-frame orientation convention.
+        # Human arm polyline through the pipeline's shoulder/elbow/wrist
+        # keypoints. ~human_arm_source:
+        #   'topic' (default): named keypoints in ~human_arm_topic
+        #       (assumed visualization_msgs/MarkerArray; the joint name
+        #        is taken from marker.ns or marker.text or 'joint<id>'),
+        #        picked in the order ~human_arm_keys.
+        #   'tf': the origins of the frames listed in ~human_arm_frames.
         self.show_arm = bool(rospy.get_param('~show_arm', True))
-        self.arm_frames = rospy.get_param(
-            '~human_arm_frames',
-            ['base_shoulder', 'RightUpperArm', 'RightForeArm', 'RightHand'])
-        if isinstance(self.arm_frames, str):
-            self.arm_frames = [s for s in self.arm_frames.replace(',', ' ').split()
-                               if s]
+        self.arm_source = str(rospy.get_param('~human_arm_source', 'topic'))
+        self.arm_topic = rospy.get_param('~human_arm_topic',
+                                         '/right_arm/kp_URDF')
+        self.arm_keys = rospy.get_param(
+            '~human_arm_keys', ['right_shoulder', 'right_elbow', 'right_wrist'])
+        self.arm_frames = rospy.get_param('~human_arm_frames', [])
+        for _a in ('arm_keys', 'arm_frames'):
+            v = getattr(self, _a)
+            if isinstance(v, str):
+                setattr(self, _a, [s for s in v.replace(',', ' ').split() if s])
         self.show_arm_fk = bool(rospy.get_param('~show_arm_fk', False))
         sc = rospy.get_param('~sc_node', '/shared_control_node')
         self._v = {'v_h': None, 'v_r': None, 'v_s': None}
         self._eta = None
         self._arm_fk = None
+        self._arm_kp = None            # latest keypoints MarkerArray
 
         self.x_actual = None
         self.tf_buffer = None
-        if self.show_arm:
+        if self.show_arm and self.arm_source == 'tf':
             import tf2_ros
             self._tf2 = tf2_ros
             self.tf_buffer = tf2_ros.Buffer()
             self._tf_listener = tf2_ros.TransformListener(self.tf_buffer)
+        if self.show_arm and self.arm_source == 'topic':
+            rospy.Subscriber(self.arm_topic, MarkerArray, self._arm_kp_cb,
+                              queue_size=1)
 
         self.viz_pub = rospy.Publisher(self.viz_topic, MarkerArray, queue_size=1)
         rospy.Subscriber(self.franka_states_topic, FrankaState,
@@ -223,6 +233,38 @@ class RvizVisualizationNode(object):
             sph.points.append(q)
         return [line, sph]
 
+    def _arm_kp_cb(self, msg):
+        self._arm_kp = msg
+
+    @staticmethod
+    def _marker_name(m):
+        return (m.ns or getattr(m, 'text', '') or 'joint%d' % m.id).strip()
+
+    def _arm_kp_points(self):
+        """(points, frame_id): the ~human_arm_keys keypoints from the
+        latest ~human_arm_topic MarkerArray, in order. ([], base) if
+        missing keys."""
+        msg = self._arm_kp
+        if msg is None:
+            rospy.logwarn_throttle(5.0, 'sc_ros_empathic_viz: no message on '
+                                   '%s yet -- human not detected?',
+                                   self.arm_topic)
+            return [], self.base_frame
+        by_name = {self._marker_name(m): m for m in msg.markers}
+        frame = (msg.markers[0].header.frame_id if msg.markers
+                 else self.base_frame)
+        out = []
+        for k in self.arm_keys:
+            m = by_name.get(k)
+            if m is None:
+                rospy.logwarn_throttle(
+                    5.0, 'sc_ros_empathic_viz: keypoint %r not in %s '
+                    '(have: %s)', k, self.arm_topic, sorted(by_name))
+                return [], frame
+            out.append((m.pose.position.x, m.pose.position.y,
+                        m.pose.position.z))
+        return out, frame
+
     def _arm_tf_points(self):
         """The ~human_arm_frames origins in ~base_frame, in order, or []
         if any lookup fails."""
@@ -245,9 +287,11 @@ class RvizVisualizationNode(object):
         array = MarkerArray()
 
         if self.show_arm:
-            # cyan: polyline through the pipeline's arm TF frames
-            array.markers.extend(self._stick(30, self.base_frame,
-                                             self._arm_tf_points(),
+            if self.arm_source == 'tf':
+                pts, frame = self._arm_tf_points(), self.base_frame
+            else:
+                pts, frame = self._arm_kp_points()
+            array.markers.extend(self._stick(30, frame, pts,
                                              (0.0, 0.9, 0.9, 1.0)))
             if self.show_arm_fk:
                 fk = self._arm_fk
