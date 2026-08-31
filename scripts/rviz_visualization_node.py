@@ -22,17 +22,13 @@ Minimal RViz visualization for the shared-control experiment:
   * eta_h / eta_r / eta_s as a floating TEXT marker above the EE (from
     ~eta). Disable with ~show_eta_text:=false. For a time plot use
     rqt_plot, not RViz.
-  * The human arm as a SPHERE_LIST + LINE_STRIP stick:
-      - cyan: looked up directly from the pipeline's TF frames
-        ~human_shoulder_frame / ~human_elbow_frame / ~human_wrist_frame
-        (so it coincides with the points' own frames and starts at the
-        REAL shoulder).
-      - magenta: shared_control_node's ~diag/arm_points_fk (FK of
-        q_h,l1,l2), published in ~human_shoulder_frame so RViz anchors
-        it at the same shoulder. Pipeline-TF vs FK divergence is a
-        consistency check.
-    A live stick = the human is being detected. ~show_arm:=false hides
-    both. Needs tf2_ros.
+  * The human arm as a SPHERE_LIST + LINE_STRIP polyline (cyan) through
+    the pipeline's own arm TF frames, in order (~human_arm_frames), so
+    it lands exactly on those frames. A live polyline = the human is
+    being detected. ~show_arm:=false hides it; needs tf2_ros. Optional
+    magenta ~diag/arm_points_fk overlay with ~show_arm_fk:=true (FK of
+    q_h,l1,l2 -- OFF by default: its elbow/wrist depend on the
+    pipeline's shoulder-frame orientation convention).
 
 Publishes a single visualization_msgs/MarkerArray to ~viz_topic
 (default /sc_ros_empathic/viz -- an ABSOLUTE name so it does not depend
@@ -80,18 +76,20 @@ class RvizVisualizationNode(object):
         self.show_vel_arrows = bool(rospy.get_param('~show_vel_arrows', True))
         self.show_eta_text = bool(rospy.get_param('~show_eta_text', True))
         self.vel_arrow_gain = float(rospy.get_param('~vel_arrow_gain', 2.0))
-        # Human arm stick. Primary source: the pipeline's own TF frames
-        # for shoulder/elbow/wrist (so it coincides with the points'
-        # reference frames and starts at the REAL shoulder). Secondary:
-        # ~diag/arm_points_fk (FK of q_h,l1,l2), which the node now
-        # publishes in the shoulder TF frame -> RViz anchors it there
-        # too, and pipeline-TF vs FK divergence is a consistency check.
+        # Human arm stick: a polyline through the pipeline's own TF
+        # frames, in order (~human_arm_frames), so it coincides exactly
+        # with those frames. List whatever chain the pipeline publishes
+        # (shoulder .. wrist); 2+ frames. Secondary: ~diag/arm_points_fk
+        # (FK of q_h,l1,l2) -- OFF by default because its elbow/wrist
+        # depend on the pipeline's shoulder-frame orientation convention.
         self.show_arm = bool(rospy.get_param('~show_arm', True))
-        self.arm_frames = [
-            rospy.get_param('~human_shoulder_frame', 'base_shoulder'),
-            rospy.get_param('~human_elbow_frame', 'RightForeArm'),
-            rospy.get_param('~human_wrist_frame', 'RightHand'),
-        ]
+        self.arm_frames = rospy.get_param(
+            '~human_arm_frames',
+            ['base_shoulder', 'RightUpperArm', 'RightForeArm', 'RightHand'])
+        if isinstance(self.arm_frames, str):
+            self.arm_frames = [s for s in self.arm_frames.replace(',', ' ').split()
+                               if s]
+        self.show_arm_fk = bool(rospy.get_param('~show_arm_fk', False))
         sc = rospy.get_param('~sc_node', '/shared_control_node')
         self._v = {'v_h': None, 'v_r': None, 'v_s': None}
         self._eta = None
@@ -114,7 +112,7 @@ class RvizVisualizationNode(object):
             rospy.Subscriber(sc + '/diag/v_s', Vector3Stamped, self._vs_cb, queue_size=1)
         if self.show_eta_text:
             rospy.Subscriber(sc + '/eta', Float64MultiArray, self._eta_cb, queue_size=1)
-        if self.show_arm:
+        if self.show_arm and self.show_arm_fk:
             rospy.Subscriber(sc + '/diag/arm_points_fk', PoseArray,
                               self._arm_fk_cb, queue_size=1)
 
@@ -198,8 +196,8 @@ class RvizVisualizationNode(object):
         self._arm_fk = msg
 
     def _stick(self, base_id, frame_id, pts_xyz, rgba):
-        """LINE_STRIP + SPHERE_LIST for 3 points in `frame_id`. Empty
-        list -> DELETE both markers."""
+        """LINE_STRIP + SPHERE_LIST through the given points in
+        `frame_id`. < 2 points -> DELETE both markers."""
         line = Marker()
         line.header = self._header()
         line.ns = 'sc_ros_empathic'
@@ -210,7 +208,7 @@ class RvizVisualizationNode(object):
         sph.ns = 'sc_ros_empathic'
         sph.id = base_id + 1
         sph.type = Marker.SPHERE_LIST
-        if not pts_xyz or len(pts_xyz) < 3:
+        if not pts_xyz or len(pts_xyz) < 2:
             line.action = sph.action = Marker.DELETE
             return [line, sph]
         line.header.frame_id = sph.header.frame_id = frame_id
@@ -219,15 +217,15 @@ class RvizVisualizationNode(object):
         line.scale.x = 0.008
         sph.scale.x = sph.scale.y = sph.scale.z = 0.025
         line.color = sph.color = ColorRGBA(*rgba)
-        for p in pts_xyz[:3]:
+        for p in pts_xyz:
             q = Point(x=float(p[0]), y=float(p[1]), z=float(p[2]))
             line.points.append(q)
             sph.points.append(q)
         return [line, sph]
 
     def _arm_tf_points(self):
-        """(shoulder, elbow, wrist) in ~base_frame from the pipeline's
-        TF frames, or [] if any lookup fails."""
+        """The ~human_arm_frames origins in ~base_frame, in order, or []
+        if any lookup fails."""
         out = []
         for fr in self.arm_frames:
             try:
@@ -236,8 +234,8 @@ class RvizVisualizationNode(object):
             except self._tf2.TransformException:
                 rospy.logwarn_throttle(
                     5.0, 'sc_ros_empathic_viz: TF %s -> %s missing -- human '
-                    'not detected? set ~human_{shoulder,elbow,wrist}_frame.',
-                    self.base_frame, fr)
+                    'not detected, or wrong name in ~human_arm_frames %s',
+                    self.base_frame, fr, self.arm_frames)
                 return []
             t = tr.transform.translation
             out.append((t.x, t.y, t.z))
@@ -247,19 +245,18 @@ class RvizVisualizationNode(object):
         array = MarkerArray()
 
         if self.show_arm:
-            # cyan: pipeline TF frames (real shoulder anchor)
+            # cyan: polyline through the pipeline's arm TF frames
             array.markers.extend(self._stick(30, self.base_frame,
                                              self._arm_tf_points(),
                                              (0.0, 0.9, 0.9, 1.0)))
-            # magenta: FK of q_h,l1,l2, in the shoulder frame it was
-            # published in
-            fk = self._arm_fk
-            fk_pts = ([(p.position.x, p.position.y, p.position.z)
-                       for p in fk.poses[:3]] if fk and len(fk.poses) >= 3
-                      else [])
-            array.markers.extend(self._stick(
-                32, (fk.header.frame_id if fk else self.base_frame),
-                fk_pts, (1.0, 0.3, 0.9, 1.0)))
+            if self.show_arm_fk:
+                fk = self._arm_fk
+                fk_pts = ([(p.position.x, p.position.y, p.position.z)
+                           for p in fk.poses] if fk and len(fk.poses) >= 2
+                          else [])
+                array.markers.extend(self._stick(
+                    32, (fk.header.frame_id if fk else self.base_frame),
+                    fk_pts, (1.0, 0.3, 0.9, 1.0)))
 
         if self.x_actual is None:
             self.viz_pub.publish(array)
