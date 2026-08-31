@@ -24,12 +24,12 @@ Minimal RViz visualization for the shared-control experiment:
     rqt_plot, not RViz.
   * The human arm as a SPHERE_LIST + LINE_STRIP polyline (cyan) through
     the pipeline's shoulder/elbow/wrist keypoints, in order. Source:
-    ~human_arm_source = 'topic' (default: named keypoints in
-    ~human_arm_topic, assumed visualization_msgs/MarkerArray, picked by
-    ~human_arm_keys) or 'tf' (origins of ~human_arm_frames, needs
-    tf2_ros). A live polyline = the human is being detected.
-    ~show_arm:=false hides it. Optional magenta ~diag/arm_points_fk
-    overlay with ~show_arm_fk:=true.
+    ~human_arm_source = 'topic' (default: ~human_arm_topic of type
+    ~human_arm_msg_type, imported by name at runtime; the point for each
+    ~human_arm_keys name is found reflectively) or 'tf' (origins of
+    ~human_arm_frames, needs tf2_ros). A live polyline = the human is
+    being detected. ~show_arm:=false hides it. Optional magenta
+    ~diag/arm_points_fk overlay with ~show_arm_fk:=true.
 
 Publishes a single visualization_msgs/MarkerArray to ~viz_topic
 (default /sc_ros_empathic/viz -- an ABSOLUTE name so it does not depend
@@ -79,15 +79,19 @@ class RvizVisualizationNode(object):
         self.vel_arrow_gain = float(rospy.get_param('~vel_arrow_gain', 2.0))
         # Human arm polyline through the pipeline's shoulder/elbow/wrist
         # keypoints. ~human_arm_source:
-        #   'topic' (default): named keypoints in ~human_arm_topic
-        #       (assumed visualization_msgs/MarkerArray; the joint name
-        #        is taken from marker.ns or marker.text or 'joint<id>'),
-        #        picked in the order ~human_arm_keys.
+        #   'topic' (default): keypoints in ~human_arm_topic, message
+        #       type ~human_arm_msg_type (imported by name at runtime,
+        #       so this node needs no build-time dep on it). The 3D
+        #       point for each ~human_arm_keys name is found reflectively
+        #       (field with that name / parallel names+points lists /
+        #       list element with a matching name attr).
         #   'tf': the origins of the frames listed in ~human_arm_frames.
         self.show_arm = bool(rospy.get_param('~show_arm', True))
         self.arm_source = str(rospy.get_param('~human_arm_source', 'topic'))
         self.arm_topic = rospy.get_param('~human_arm_topic',
                                          '/right_arm/kp_URDF')
+        self.arm_msg_type = rospy.get_param('~human_arm_msg_type',
+                                            'upper_limb_kinematics/KP_URDF')
         self.arm_keys = rospy.get_param(
             '~human_arm_keys', ['right_shoulder', 'right_elbow', 'right_wrist'])
         self.arm_frames = rospy.get_param('~human_arm_frames', [])
@@ -100,7 +104,7 @@ class RvizVisualizationNode(object):
         self._v = {'v_h': None, 'v_r': None, 'v_s': None}
         self._eta = None
         self._arm_fk = None
-        self._arm_kp = None            # latest keypoints MarkerArray
+        self._arm_kp = None            # latest keypoints message
 
         self.x_actual = None
         self.tf_buffer = None
@@ -110,8 +114,21 @@ class RvizVisualizationNode(object):
             self.tf_buffer = tf2_ros.Buffer()
             self._tf_listener = tf2_ros.TransformListener(self.tf_buffer)
         if self.show_arm and self.arm_source == 'topic':
-            rospy.Subscriber(self.arm_topic, MarkerArray, self._arm_kp_cb,
-                              queue_size=1)
+            try:
+                import importlib
+                pkg, name = self.arm_msg_type.split('/')
+                cls = getattr(importlib.import_module(pkg + '.msg'), name)
+                rospy.Subscriber(self.arm_topic, cls, self._arm_kp_cb,
+                                  queue_size=1)
+                rospy.loginfo('sc_ros_empathic_viz: human arm keypoints from '
+                              '%s (%s), keys %s', self.arm_topic,
+                              self.arm_msg_type, self.arm_keys)
+            except Exception as e:
+                rospy.logerr('sc_ros_empathic_viz: cannot use %s (%s): %s -- '
+                             'arm polyline disabled. Set ~human_arm_msg_type '
+                             'or ~human_arm_source:=tf.', self.arm_topic,
+                             self.arm_msg_type, e)
+                self.show_arm = False
 
         self.viz_pub = rospy.Publisher(self.viz_topic, MarkerArray, queue_size=1)
         rospy.Subscriber(self.franka_states_topic, FrankaState,
@@ -237,32 +254,91 @@ class RvizVisualizationNode(object):
         self._arm_kp = msg
 
     @staticmethod
-    def _marker_name(m):
-        return (m.ns or getattr(m, 'text', '') or 'joint%d' % m.id).strip()
+    def _as_xyz(obj):
+        """(x, y, z) from a Point/Vector3, a Pose(Stamped), or a
+        len-3 sequence; None otherwise."""
+        for path in ((), ('position',), ('pose', 'position'),
+                     ('point',), ('translation',), ('transform', 'translation')):
+            o = obj
+            try:
+                for a in path:
+                    o = getattr(o, a)
+                return (float(o.x), float(o.y), float(o.z))
+            except AttributeError:
+                continue
+        try:
+            if len(obj) >= 3:
+                return (float(obj[0]), float(obj[1]), float(obj[2]))
+        except TypeError:
+            pass
+        return None
+
+    @staticmethod
+    def _name_of(el):
+        for a in ('name', 'label', 'id', 'ns', 'text', 'child_frame_id',
+                  'joint_name', 'key'):
+            v = getattr(el, a, None)
+            if isinstance(v, str) and v:
+                return v
+        return None
 
     def _arm_kp_points(self):
-        """(points, frame_id): the ~human_arm_keys keypoints from the
-        latest ~human_arm_topic MarkerArray, in order. ([], base) if
-        missing keys."""
+        """(points, frame_id) for ~human_arm_keys from the latest
+        keypoints message, found reflectively. ([], base) if any key is
+        missing."""
         msg = self._arm_kp
         if msg is None:
-            rospy.logwarn_throttle(5.0, 'sc_ros_empathic_viz: no message on '
-                                   '%s yet -- human not detected?',
-                                   self.arm_topic)
+            rospy.logwarn_throttle(5.0, 'sc_ros_empathic_viz: nothing on %s '
+                                   'yet -- human not detected?', self.arm_topic)
             return [], self.base_frame
-        by_name = {self._marker_name(m): m for m in msg.markers}
-        frame = (msg.markers[0].header.frame_id if msg.markers
-                 else self.base_frame)
+        frame = getattr(getattr(msg, 'header', None), 'frame_id', '') \
+            or self.base_frame
+
+        # index of {name -> xyz}, tried three ways
+        idx = {}
+        # (a) a field named exactly like the key
+        for k in self.arm_keys:
+            p = self._as_xyz(getattr(msg, k, None)) if hasattr(msg, k) else None
+            if p is not None:
+                idx[k] = p
+        # (b) parallel names[] + points[]/positions[]/poses[]
+        for nf in ('names', 'labels', 'joint_names', 'keypoint_names'):
+            names = getattr(msg, nf, None)
+            if not names:
+                continue
+            for pf in ('points', 'positions', 'poses', 'keypoints', 'data'):
+                pts = getattr(msg, pf, None)
+                if pts is not None and len(pts) == len(names):
+                    for n, pt in zip(names, pts):
+                        p = self._as_xyz(pt)
+                        if p is not None:
+                            idx.setdefault(n, p)
+                    break
+        # (c) any list attribute whose elements have a name attr
+        for a in dir(msg):
+            if a.startswith('_'):
+                continue
+            seq = getattr(msg, a, None)
+            if not isinstance(seq, (list, tuple)) or not seq:
+                continue
+            for el in seq:
+                n = self._name_of(el)
+                p = self._as_xyz(el)
+                if n and p is not None:
+                    idx.setdefault(n, p)
+                    fr = getattr(getattr(el, 'header', None), 'frame_id', '')
+                    if fr:
+                        frame = fr
+
         out = []
         for k in self.arm_keys:
-            m = by_name.get(k)
-            if m is None:
+            if k not in idx:
                 rospy.logwarn_throttle(
-                    5.0, 'sc_ros_empathic_viz: keypoint %r not in %s '
-                    '(have: %s)', k, self.arm_topic, sorted(by_name))
+                    5.0, 'sc_ros_empathic_viz: keypoint %r not found in %s '
+                    '(found: %s). Check ~human_arm_keys / ~human_arm_msg_type.',
+                    k, self.arm_topic, sorted(idx))
                 return [], frame
-            out.append((m.pose.position.x, m.pose.position.y,
-                        m.pose.position.z))
+            out.append(idx[k])
         return out, frame
 
     def _arm_tf_points(self):
