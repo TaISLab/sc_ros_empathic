@@ -107,6 +107,11 @@
   <arg name="show_vel_arrows" default="true"/>  <!-- v_h/v_r/v_s as arrows at the EE -->
   <arg name="show_eta_text"   default="true"/>  <!-- eta_h/eta_r/eta_s as floating text -->
   <arg name="vel_arrow_gain"  default="2.0"/>   <!-- metres of arrow per m/s -->
+  <arg name="show_arm"        default="true"/>  <!-- human shoulder/elbow/wrist stick in RViz -->
+  <!-- Where to anchor the FK arm (~diag/arm_points_fk, 'human_shoulder'
+       frame): x y z of the shoulder in the base frame. Approximate;
+       only the arm's SHAPE and MOTION matter as a detection check. -->
+  <arg name="human_shoulder_xyz" default="0.75 0.0 0.6"/>
   <arg name="rviz_config" default="$(find sc_ros_empathic)/rviz/shared_control.rviz"/>
 
   <!-- Gains / weights / model params (PLACEHOLDER values, see file). -->
@@ -206,8 +211,16 @@
     <param name="show_vel_arrows" value="$(arg show_vel_arrows)"/>
     <param name="show_eta_text"   value="$(arg show_eta_text)"/>
     <param name="vel_arrow_gain"  value="$(arg vel_arrow_gain)"/>
+    <param name="show_arm"        value="$(arg show_arm)"/>
     <param name="sc_node" value="/shared_control_node"/>
   </node>
+
+  <!-- Anchors the FK human arm (~diag/arm_points_fk) so RViz can draw
+       it. ~diag/arm_points (pipeline) uses its own frame and needs no
+       TF here. -->
+  <node pkg="tf2_ros" type="static_transform_publisher"
+        name="human_shoulder_tf"
+        args="$(arg human_shoulder_xyz) 0 0 0 $(arg base_link) human_shoulder"/>
 
   <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz"
         args="-d $(arg rviz_config)"/>

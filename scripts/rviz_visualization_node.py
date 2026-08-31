@@ -22,6 +22,11 @@ Minimal RViz visualization for the shared-control experiment:
   * eta_h / eta_r / eta_s as a floating TEXT marker above the EE (from
     ~eta). Disable with ~show_eta_text:=false. For a time plot use
     rqt_plot, not RViz.
+  * The human arm: shoulder/elbow/wrist as a SPHERE_LIST + LINE_STRIP
+    stick, from shared_control_node's ~diag/arm_points (pipeline, cyan)
+    and ~diag/arm_points_fk (FK of q_h,l1,l2 in the 'human_shoulder'
+    frame the launch's static TF anchors, magenta). A live 3-segment
+    stick = the human is being detected. Disable with ~show_arm:=false.
 
 Publishes a single visualization_msgs/MarkerArray to ~viz_topic
 (default /sc_ros_empathic/viz -- an ABSOLUTE name so it does not depend
@@ -33,7 +38,7 @@ topic.
 import numpy as np
 import rospy
 from franka_msgs.msg import FrankaState
-from geometry_msgs.msg import Point, Vector3Stamped
+from geometry_msgs.msg import Point, PoseArray, Vector3Stamped
 from std_msgs.msg import ColorRGBA, Float64MultiArray, Header
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -69,9 +74,17 @@ class RvizVisualizationNode(object):
         self.show_vel_arrows = bool(rospy.get_param('~show_vel_arrows', True))
         self.show_eta_text = bool(rospy.get_param('~show_eta_text', True))
         self.vel_arrow_gain = float(rospy.get_param('~vel_arrow_gain', 2.0))
+        # Human arm (shoulder/elbow/wrist) from shared_control_node:
+        # ~diag/arm_points  = pipeline points in their fixed frame
+        # ~diag/arm_points_fk = FK from q_h,l1,l2 in 'human_shoulder'
+        #                       (needs the static TF that the launch
+        #                        publishes). A live 3-segment stick =
+        #                        the human is being detected.
+        self.show_arm = bool(rospy.get_param('~show_arm', True))
         sc = rospy.get_param('~sc_node', '/shared_control_node')
         self._v = {'v_h': None, 'v_r': None, 'v_s': None}
         self._eta = None
+        self._arm = {'arm_points': None, 'arm_points_fk': None}
 
         self.x_actual = None
 
@@ -84,6 +97,13 @@ class RvizVisualizationNode(object):
             rospy.Subscriber(sc + '/diag/v_s', Vector3Stamped, self._vs_cb, queue_size=1)
         if self.show_eta_text:
             rospy.Subscriber(sc + '/eta', Float64MultiArray, self._eta_cb, queue_size=1)
+        if self.show_arm:
+            rospy.Subscriber(sc + '/diag/arm_points', PoseArray,
+                              lambda m: self._arm.__setitem__('arm_points', m),
+                              queue_size=1)
+            rospy.Subscriber(sc + '/diag/arm_points_fk', PoseArray,
+                              lambda m: self._arm.__setitem__('arm_points_fk', m),
+                              queue_size=1)
 
         # The path itself is static: republish it at a slow rate so a
         # late-joining RViz instance still picks it up without needing
@@ -162,9 +182,17 @@ class RvizVisualizationNode(object):
         return d
 
     def _publish_ee_marker(self):
-        if self.x_actual is None:
-            return
         array = MarkerArray()
+
+        if self.show_arm:
+            for base_id, key, rgba in ((30, 'arm_points', (0.0, 0.9, 0.9, 1.0)),
+                                       (33, 'arm_points_fk', (1.0, 0.3, 0.9, 1.0))):
+                array.markers.extend(self._arm_markers(base_id, self._arm[key],
+                                                       rgba))
+
+        if self.x_actual is None:
+            self.viz_pub.publish(array)
+            return
 
         s = Marker()
         s.header = self._header()
@@ -208,6 +236,37 @@ class RvizVisualizationNode(object):
             array.markers.append(self._eta_text_marker(self.x_actual))
 
         self.viz_pub.publish(array)
+
+    def _arm_markers(self, base_id, pa, rgba):
+        """Shoulder/elbow/wrist of a PoseArray as a LINE_STRIP + a
+        SPHERE_LIST, in the PoseArray's own frame. Empty (DELETE) until
+        a message with 3 poses arrives."""
+        line = Marker()
+        line.header = self._header()
+        line.ns = 'sc_ros_empathic'
+        line.id = base_id
+        line.type = Marker.LINE_STRIP
+        pts = Marker()
+        pts.header = self._header()
+        pts.ns = 'sc_ros_empathic'
+        pts.id = base_id + 1
+        pts.type = Marker.SPHERE_LIST
+        if pa is None or len(pa.poses) < 3:
+            line.action = pts.action = Marker.DELETE
+            return [line, pts]
+        line.header.frame_id = pts.header.frame_id = (
+            pa.header.frame_id or self.base_frame)
+        line.action = pts.action = Marker.ADD
+        line.pose.orientation.w = pts.pose.orientation.w = 1.0
+        line.scale.x = 0.008
+        pts.scale.x = pts.scale.y = pts.scale.z = 0.025
+        line.color = ColorRGBA(*rgba)
+        pts.color = ColorRGBA(*rgba)
+        for p in pa.poses[:3]:
+            q = Point(x=p.position.x, y=p.position.y, z=p.position.z)
+            line.points.append(q)
+            pts.points.append(q)
+        return [line, pts]
 
     def _arrow_marker(self, mid, origin, vec, rgba):
         a = Marker()

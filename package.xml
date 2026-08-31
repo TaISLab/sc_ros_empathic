@@ -73,6 +73,7 @@
   <exec_depend>std_srvs</exec_depend>
   <exec_depend>franka_msgs</exec_depend>
   <exec_depend>visualization_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
   <!-- PyKDL / kdl_parser_py: system packages (ros-<distro>-python-orocos-kdl,
        ros-<distro>-kdl-parser-py), used by robot_model.py for the
        analytic robot Jacobian (see robot_model.py's module docstring
