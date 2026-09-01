@@ -36,6 +36,7 @@ For the raw time series without the bands, rqt_plot is still fine:
 
 import collections
 import math
+import threading
 
 import rospy
 from std_msgs.msg import Float64MultiArray
@@ -65,6 +66,11 @@ class JointAnglePlot(object):
         fh_topic = rospy.get_param(
             '~factors_h_topic', '/shared_control_node/diag/factors_h')
 
+        # ROS delivers each callback on its own thread; the draw loop
+        # runs on the main thread. All deque access is under this lock
+        # (otherwise a mid-snapshot append leaves the x/y arrays one
+        # sample apart and matplotlib raises a broadcast error).
+        self._lock = threading.Lock()
         self.t = collections.deque()
         self.q = [collections.deque() for _ in range(4)]
         self.limits = None            # [(min,max)] x4, degrees
@@ -111,11 +117,12 @@ class JointAnglePlot(object):
     def _deg_cb(self, msg):
         if len(msg.data) < 4:
             return
-        now = self._elapsed()
-        self.t.append(now)
-        for i in range(4):
-            self.q[i].append(float(msg.data[i]))
-        self._trim(self.t, self.q)
+        vals = [float(msg.data[i]) for i in range(4)]
+        with self._lock:
+            self.t.append(self._elapsed())
+            for i in range(4):
+                self.q[i].append(vals[i])
+            self._trim(self.t, self.q)
 
     def _fh_cb(self, msg):
         if len(msg.data) <= FACTORS_H_JOINT_SAFETY_IDX:
@@ -123,14 +130,17 @@ class JointAnglePlot(object):
         v = float(msg.data[FACTORS_H_JOINT_SAFETY_IDX])
         if not math.isfinite(v):
             return
-        self.eta3_t.append(self._elapsed())
-        self.eta3.append(v)
-        self._trim(self.eta3_t, [self.eta3])
+        with self._lock:
+            self.eta3_t.append(self._elapsed())
+            self.eta3.append(v)
+            self._trim(self.eta3_t, [self.eta3])
 
     def _lim_cb(self, msg):
         if len(msg.data) >= 8:
-            self.limits = [(float(msg.data[2 * i]), float(msg.data[2 * i + 1]))
-                           for i in range(4)]
+            lims = [(float(msg.data[2 * i]), float(msg.data[2 * i + 1]))
+                    for i in range(4)]
+            with self._lock:
+                self.limits = lims
 
     def _elapsed(self):
         now = rospy.Time.now().to_sec()
@@ -147,13 +157,13 @@ class JointAnglePlot(object):
             for s in series:
                 s.popleft()
 
-    def _draw_bands(self):
+    def _draw_bands(self, limits):
         for a in self._band_artists:
             a.remove()
         self._band_artists = []
-        if not self.limits:
+        if not limits:
             return
-        for i, (lo, hi) in enumerate(self.limits):
+        for i, (lo, hi) in enumerate(limits):
             c = JOINT_COLOURS[i]
             self._band_artists.append(
                 self.ax.axhspan(lo, hi, color=c, alpha=0.08, zorder=0))
@@ -162,23 +172,31 @@ class JointAnglePlot(object):
                     self.ax.axhline(y, color=c, ls='--', lw=1.0, alpha=0.7,
                                     zorder=1))
 
-    def _latest_t(self):
-        return max((tq[-1] for tq in (self.t, self.eta3_t) if tq), default=None)
+    def _snapshot(self):
+        """Consistent copy of the plot data, taken under the lock."""
+        with self._lock:
+            tt = list(self.t)
+            qq = [list(d) for d in self.q]
+            e_t = list(self.eta3_t)
+            e_v = list(self.eta3)
+            lims = list(self.limits) if self.limits else None
+        return tt, qq, e_t, e_v, lims
 
     def spin(self):
         plt.ion()
         plt.show()
         rate = rospy.Rate(self.redraw_hz)
         while not rospy.is_shutdown():
-            last = self._latest_t()
+            tt, qq, e_t, e_v, lims = self._snapshot()
+            last = max((s[-1] for s in (tt, e_t) if s), default=None)
             if last is not None:
-                if self.t:
-                    tt = list(self.t)
-                    for i in range(4):
-                        self.lines[i].set_data(tt, list(self.q[i]))
-                if self.eta3_line is not None and self.eta3_t:
-                    self.eta3_line.set_data(list(self.eta3_t), list(self.eta3))
-                self._draw_bands()
+                for i in range(4):
+                    n = min(len(tt), len(qq[i]))
+                    self.lines[i].set_data(tt[:n], qq[i][:n])
+                if self.eta3_line is not None and e_t:
+                    n = min(len(e_t), len(e_v))
+                    self.eta3_line.set_data(e_t[:n], e_v[:n])
+                self._draw_bands(lims)
                 self.ax.set_xlim(max(0.0, last - self.window_s),
                                  max(self.window_s, last))
                 self.ax.relim()
