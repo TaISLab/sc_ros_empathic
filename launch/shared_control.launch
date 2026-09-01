@@ -108,9 +108,10 @@
   <arg name="show_eta_text"   default="true"/>  <!-- eta_h/eta_r/eta_s as floating text -->
   <arg name="vel_arrow_gain"  default="2.0"/>   <!-- metres of arrow per m/s -->
   <!-- Human joint angles are NOT drawn in RViz. Quick view:
-         rqt_plot /shared_control_node/diag/joint_deg/data[0]:data[1]:data[2]:data[3]  (deg)
-       joint_plot:=true also opens plot_joint_angles.py -- q1..q4 with
-       each joint's [min,max] band in the SAME colour as its trace. -->
+       rqt_plot then diag/joint_deg data[0..3] (deg). joint_plot:=true
+       also opens plot_joint_angles.py: q1..q4 with each joint's
+       [min,max] band in the SAME colour as its trace, plus the
+       joint_safety efficiency (factors_h[2]) on a right-hand axis. -->
   <arg name="joint_plot" default="false"/>
   <!-- Frame that ~diag/arm_points_fk (FK of q_h,l1,l2) is published in.
        The human arm itself is drawn by the pipeline, not this package. -->
