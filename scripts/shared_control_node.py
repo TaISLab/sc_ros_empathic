@@ -327,6 +327,25 @@ class SharedControlNode(object):
             rospy.loginfo('shared_control_node: joint ranges = study defaults '
                           '(performance.DEFAULT_JOINT_LIMITS)')
 
+        # Per-joint zero offset (rad), SUBTRACTED from the incoming
+        # q1..q4 so the visuo-tactile pipeline's angle convention lines
+        # up with the DH model / joint_limits (which assume q=0 at the
+        # goniometric neutral posture). This is a property of the
+        # pipeline, not the volunteer -> config/shared_control.yaml.
+        # E.g. if the pipeline reports q3 = pi/2 at the model's neutral,
+        # set ~human_joint_offsets: [0, 0, 1.5708, 0]. Affects the
+        # limits AND the arm Jacobian (both use q). Default: no offset.
+        jo = rospy.get_param('~human_joint_offsets', [0.0, 0.0, 0.0, 0.0])
+        jo = np.asarray(jo, dtype=float)
+        if jo.size != 4:
+            rospy.logfatal('shared_control_node: ~human_joint_offsets must '
+                           'have 4 values (q1..q4, rad), got %d', jo.size)
+            raise rospy.ROSInitException('bad ~human_joint_offsets')
+        self.human_joint_offsets = jo
+        if np.any(jo != 0.0):
+            rospy.loginfo('shared_control_node: human joint offsets (rad) '
+                          'subtracted from q1..q4: %s', jo.tolist())
+
         # tau: the joint-margin threshold IS homogeneous across
         # volunteers -- it stays in config/shared_control.yaml.
         self.proximity_threshold = rospy.get_param('~proximity_threshold', 0.3)
@@ -683,6 +702,7 @@ class SharedControlNode(object):
                 self.human_joint_state_topic, len(pos), list(msg.name))
             return
 
+        q = q - self.human_joint_offsets   # pipeline convention -> DH model
         now = rospy.Time.now()
         if self.q_h is None:
             rospy.loginfo('shared_control_node: first q_h on %s = %s  l1,l2=%s',

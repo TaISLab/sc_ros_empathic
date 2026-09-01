@@ -96,6 +96,14 @@ proximity_threshold: 0.3
 # (performance.DEFAULT_JOINT_LIMITS) are used.
 # human_joint_limits: [-1.05, 3.14,  0.0, 3.14,  -1.57, 1.57,  0.0, 2.53]
 
+# Per-joint zero offset (rad), SUBTRACTED from the pipeline's q1..q4 so
+# its angle convention matches the DH model / joint_limits (q=0 at the
+# goniometric neutral). Property of the visuo-tactile pipeline, not the
+# volunteer. Affects the limits AND the arm Jacobian. Calibrate from a
+# known neutral posture (see README "Checking joint_safety"). Example:
+# pipeline reads q3 ~ pi/2 at neutral -> shift it back:
+# human_joint_offsets: [0.0, 0.0, 1.5708, 0.0]
+
 # --- Human-arm segment lengths ----------------------------------
 # The visuo-tactile pipeline is expected to publish time-varying
 # [l1, l2] on ~human_link_lengths_topic. The static fallback (used
