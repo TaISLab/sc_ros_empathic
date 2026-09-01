@@ -146,6 +146,10 @@ To also see each joint's `[min, max]` range as a shaded band **in the
 same colour as its trace** (which `rqt_plot` cannot do), launch with
 `joint_plot:=true` -- it runs `plot_joint_angles.py`, a matplotlib
 window fed by `~diag/joint_deg` + the latched `~diag/joint_deg_limits`.
+A right-hand axis on that window carries the **human joint-safety
+efficiency** `factors_h[2]` (`joint_safety`, in `(0, 1]`) so you see it
+fall as a joint trace enters its band; `show_joint_safety:=false` drops
+it.
 
 Plus the FR3 model, and the **human arm as the visuo-tactile pipeline
 publishes it** -- this package does not draw the arm: `/skeleton_3d/keypoints`
