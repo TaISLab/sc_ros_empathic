@@ -134,13 +134,19 @@ On `/sc_ros_empathic/viz` (this package):
 | amber line | LINE_STRIP | trajectory actually followed (EE trail; `trail_len:=0` disables) |
 | **green / blue / red arrows** at the EE | ARROW | **`v_h` / `v_r` / `v_s`**, length = `vel_arrow_gain` m per m/s (`show_vel_arrows:=false` hides them) |
 | white text above the EE | TEXT_VIEW_FACING | **`eta_h` / `eta_r` / `eta_s`** live values (`show_eta_text:=false` hides it) |
-| 4 horizontal bars + labels | LINE_STRIP + CUBE + TEXT | **per-joint gauge**: each human joint `q_i` on a bar from `q_min_i` to `q_max_i`, marker at the current value, green/amber/red by margin. A live check of what `joint_safety` is computed from. `show_joint_gauges:=false` hides them; `joint_gauge_origin:="[x,y,z]"` moves them. |
+
+The human joint angles are **not** drawn in RViz. For a live view of
+all four at once, one `rqt_plot` window (degrees):
+
+```bash
+rqt_plot /shared_control_node/diag/joint_deg/data[0]:data[1]:data[2]:data[3]
+```
 
 Plus the FR3 model, and the **human arm as the visuo-tactile pipeline
-publishes it** -- this package does not draw the arm: `/skeleton_3D/connectors`
-(`Marker`), `/skeleton_3D/keypoints` (`PointCloud`), and the
+publishes it** -- this package does not draw the arm: `/skeleton_3d/keypoints`
+(`PointCloud`), `/skeleton_3d/connectors` (`Marker`), and the
 `/right_arm_description` URDF (`RobotModel`). A live skeleton = the
-human is being detected.
+human is being detected. (Topic names are lower-case `3d`.)
 
 RViz cannot plot a scalar over time -- for the **efficiency / factor
 time series** use `rqt_plot`:
@@ -151,10 +157,11 @@ rqt_plot /shared_control_node/diag/factors_h/data[0]:data[1]:data[2]:data[3]
 rqt_plot /shared_control_node/diag/v_s/vector/x:y:z
 ```
 
-**Checking `joint_safety`** against the joints: `~diag/joint_rho` is the
-signed per-joint position `rho_i` in `[-1, 1]` (`0` mid-range, `+-1` at
-a limit) -- the exact quantity the factor penalises;
-`~diag/joint_margins` is `[m1..m4, min]` with `m_i = 1 - |rho_i|`.
+**Checking `joint_safety`** against the joints: `~diag/joint_deg` is
+`q1..q4` in degrees (the raw angles); `~diag/joint_rho` is the signed
+per-joint position `rho_i` in `[-1, 1]` (`0` mid-range, `+-1` at a
+limit) -- the exact quantity the factor penalises; `~diag/joint_margins`
+is `[m1..m4, min]` with `m_i = 1 - |rho_i|`.
 
 ```bash
 rqt_plot /shared_control_node/diag/joint_margins/data[0]:data[1]:data[2]:data[3]:data[4] /shared_control_node/diag/factors_h/data[2]

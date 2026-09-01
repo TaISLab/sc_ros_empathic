@@ -487,6 +487,11 @@ class SharedControlNode(object):
             # signed per-joint position rho in [-1,1] (0 mid, +-1 limit)
             'joint_rho': rospy.Publisher('~diag/joint_rho', Float64MultiArray,
                                           queue_size=1),
+            # q1..q4 in DEGREES -- one rqt_plot window shows all four
+            # joint angles at once (rho is unitless, radians are
+            # awkward): rqt_plot /shared_control_node/diag/joint_deg/data[0]:data[1]:data[2]:data[3]
+            'joint_deg': rospy.Publisher('~diag/joint_deg', Float64MultiArray,
+                                          queue_size=1),
             # [q1min,q1max, ...q4min,q4max] (rad), latched
             'joint_limits': rospy.Publisher('~diag/joint_limits',
                                              Float64MultiArray, queue_size=1,
@@ -826,6 +831,8 @@ class SharedControlNode(object):
             self.diag['joint_rho'].publish(Float64MultiArray(
                 data=[float(r) for r in joint_rho(self.q_h,
                                                   self.human_joint_limits)]))
+            self.diag['joint_deg'].publish(Float64MultiArray(
+                data=[float(np.degrees(q)) for q in self.q_h[:4]]))
 
         if self.manipulability_available and self.J_robot is not None:
             self.diag['manipulability'].publish(
