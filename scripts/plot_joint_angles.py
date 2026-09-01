@@ -15,9 +15,16 @@ penalty, -> 0 as any joint nears a limit. Watch it drop as a trace
 enters its coloured band. NaN (condition without joint_safety, or no
 fresh human state) simply leaves a gap.
 
+Dashed traces (same colour per joint) are the FUTURE joint angles the
+human command v_h projects to -- q_h + qdot_h * horizon, the quantity
+joint_safety's dynamic term scores. A dashed trace heading into a band
+is what pulls eta3 down.
+
 Subscribes:
   ~joint_deg_topic         (std_msgs/Float64MultiArray, data = q1..q4 deg)
       default /shared_control_node/diag/joint_deg
+  ~joint_deg_future_topic  (std_msgs/Float64MultiArray, data = q1..q4 deg)
+      default /shared_control_node/diag/joint_deg_future
   ~joint_deg_limits_topic  (std_msgs/Float64MultiArray, latched,
                             data = [q1min,q1max, ... q4min,q4max] deg)
       default /shared_control_node/diag/joint_deg_limits
@@ -29,6 +36,7 @@ Params:
   ~window_s          rolling time window shown (s), default 30
   ~redraw_hz         figure redraw rate (Hz),      default 15
   ~show_joint_safety draw the eta3 trace,          default true
+  ~show_future       draw the dashed v_h-projection traces, default true
 
 For the raw time series without the bands, rqt_plot is still fine:
   rqt_plot /shared_control_node/diag/joint_deg/data[0]:data[1]:data[2]:data[3]
@@ -58,8 +66,12 @@ class JointAnglePlot(object):
         self.window_s = float(rospy.get_param('~window_s', 30.0))
         self.redraw_hz = float(rospy.get_param('~redraw_hz', 15.0))
         self.show_eta3 = bool(rospy.get_param('~show_joint_safety', True))
+        self.show_future = bool(rospy.get_param('~show_future', True))
         deg_topic = rospy.get_param(
             '~joint_deg_topic', '/shared_control_node/diag/joint_deg')
+        fut_topic = rospy.get_param(
+            '~joint_deg_future_topic',
+            '/shared_control_node/diag/joint_deg_future')
         lim_topic = rospy.get_param(
             '~joint_deg_limits_topic',
             '/shared_control_node/diag/joint_deg_limits')
@@ -75,8 +87,10 @@ class JointAnglePlot(object):
         self.q = [collections.deque() for _ in range(4)]
         self.limits = None            # [(min,max)] x4, degrees
         self._t0 = None
-        # eta3 keeps its own (t, value) history: it arrives on a
-        # separate topic and may be absent for whole runs.
+        # Future (v_h projection) and eta3 each keep their own (t, value)
+        # history: separate topics, either may be absent for whole runs.
+        self.qf_t = collections.deque()
+        self.qf = [collections.deque() for _ in range(4)]
         self.eta3_t = collections.deque()
         self.eta3 = collections.deque()
 
@@ -84,6 +98,9 @@ class JointAnglePlot(object):
                          queue_size=5)
         rospy.Subscriber(lim_topic, Float64MultiArray, self._lim_cb,
                          queue_size=1)
+        if self.show_future:
+            rospy.Subscriber(fut_topic, Float64MultiArray, self._fut_cb,
+                             queue_size=5)
         if self.show_eta3:
             rospy.Subscriber(fh_topic, Float64MultiArray, self._fh_cb,
                              queue_size=5)
@@ -97,6 +114,13 @@ class JointAnglePlot(object):
                          label=JOINT_LABELS[i])[0]
             for i in range(4)
         ]
+        self.fut_lines = []
+        if self.show_future:
+            self.fut_lines = [
+                self.ax.plot([], [], color=JOINT_COLOURS[i], lw=1.3,
+                             ls='--', alpha=0.9)[0]
+                for i in range(4)
+            ]
         self._band_artists = []
         self.ax.grid(True, alpha=0.3)
 
@@ -110,8 +134,12 @@ class JointAnglePlot(object):
                 [], [], color=ETA3_COLOUR, lw=2.2, ls='-',
                 label='eta3 joint_safety')
 
-        handles = list(self.lines) + (
-            [self.eta3_line] if self.eta3_line is not None else [])
+        handles = list(self.lines)
+        if self.fut_lines:
+            handles.append(plt.Line2D([], [], color='#666666', lw=1.3,
+                                      ls='--', label='v_h projection (future)'))
+        if self.eta3_line is not None:
+            handles.append(self.eta3_line)
         self.ax.legend(handles=handles, loc='upper left', fontsize=8, ncol=2)
 
     def _deg_cb(self, msg):
@@ -123,6 +151,16 @@ class JointAnglePlot(object):
             for i in range(4):
                 self.q[i].append(vals[i])
             self._trim(self.t, self.q)
+
+    def _fut_cb(self, msg):
+        if len(msg.data) < 4:
+            return
+        vals = [float(msg.data[i]) for i in range(4)]
+        with self._lock:
+            self.qf_t.append(self._elapsed())
+            for i in range(4):
+                self.qf[i].append(vals[i])
+            self._trim(self.qf_t, self.qf)
 
     def _fh_cb(self, msg):
         if len(msg.data) <= FACTORS_H_JOINT_SAFETY_IDX:
@@ -177,22 +215,27 @@ class JointAnglePlot(object):
         with self._lock:
             tt = list(self.t)
             qq = [list(d) for d in self.q]
+            ft = list(self.qf_t)
+            ff = [list(d) for d in self.qf]
             e_t = list(self.eta3_t)
             e_v = list(self.eta3)
             lims = list(self.limits) if self.limits else None
-        return tt, qq, e_t, e_v, lims
+        return tt, qq, ft, ff, e_t, e_v, lims
 
     def spin(self):
         plt.ion()
         plt.show()
         rate = rospy.Rate(self.redraw_hz)
         while not rospy.is_shutdown():
-            tt, qq, e_t, e_v, lims = self._snapshot()
-            last = max((s[-1] for s in (tt, e_t) if s), default=None)
+            tt, qq, ft, ff, e_t, e_v, lims = self._snapshot()
+            last = max((s[-1] for s in (tt, ft, e_t) if s), default=None)
             if last is not None:
                 for i in range(4):
                     n = min(len(tt), len(qq[i]))
                     self.lines[i].set_data(tt[:n], qq[i][:n])
+                for i, ln in enumerate(self.fut_lines):
+                    n = min(len(ft), len(ff[i]))
+                    ln.set_data(ft[:n], ff[i][:n])
                 if self.eta3_line is not None and e_t:
                     n = min(len(e_t), len(e_v))
                     self.eta3_line.set_data(e_t[:n], e_v[:n])

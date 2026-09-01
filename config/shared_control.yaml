@@ -73,6 +73,12 @@ C2: 1.0                   # directness   eta_k2 = exp(-C2 |angle(v_k, tangent)|)
 Cs: 12.0                  # human joint-limit safety factor
 Cm: 24.0                  # robot manipulability factor
 
+# VISUALISATION ONLY: horizon (s) for ~diag/joint_deg_future = q_h +
+# qdot_h * horizon (qdot_h = the v_h-induced joint velocity that
+# joint_safety's dynamic term scores). Shows where v_h is pushing each
+# joint on the joint plot; not used by the controller. 0 disables it.
+joint_future_horizon_s: 1.0
+
 # --- Performance-factor blend weights (w_i in eta_k = sum w_i eta_ki / sum w_i)
 # For a clean B-vs-E comparison keep w_smoothness / w_directness identical
 # across conditions; the node already only *activates* the factor subset

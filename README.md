@@ -149,7 +149,11 @@ window fed by `~diag/joint_deg` + the latched `~diag/joint_deg_limits`.
 A right-hand axis on that window carries the **human joint-safety
 efficiency** `factors_h[2]` (`joint_safety`, in `(0, 1]`) so you see it
 fall as a joint trace enters its band; `show_joint_safety:=false` drops
-it.
+it. **Dashed traces** (same colour per joint) are the future angles the
+human command `v_h` projects to -- `q_h + qdot_h * joint_future_horizon_s`
+(`~diag/joint_deg_future`), the quantity `joint_safety`'s dynamic term
+scores; a dashed trace heading into a band is what pulls `eta3` down.
+`show_future:=false` (or `joint_future_horizon_s: 0`) drops them.
 
 Plus the FR3 model, and the **human arm as the visuo-tactile pipeline
 publishes it** -- this package does not draw the arm: `/skeleton_3d/keypoints`
