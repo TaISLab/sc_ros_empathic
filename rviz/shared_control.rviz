@@ -1,8 +1,9 @@
 # RViz config for sc_ros_empathic. On /sc_ros_empathic/viz: the circle
 # to trace (outline + disc), the EE + its trail, the v_h/v_r/v_s arrows
 # and the eta text. Plus the human arm as the visuo-tactile pipeline
-# publishes it (/skeleton_3D/connectors, /skeleton_3D/keypoints,
-# /right_arm_description). The FR3 model is included but DISABLED (it
+# publishes it (/skeleton_3d/keypoints, /skeleton_3d/connectors,
+# /right_arm_description -- topic names are lower-case "3d"). The FR3
+# model is included but DISABLED (it
 # hides the task); enable it in the Displays panel if you want it.
 # Fixed Frame base_link. Default view: 3D orbit framing the circle,
 # the FR3 and the human (who sits ~0.5 m in +Y); a tight top-down on
@@ -60,7 +61,7 @@ Visualization Manager:
         - Class: rviz/Marker
           Name: connectors
           Enabled: true
-          Marker Topic: /skeleton_3D/connectors
+          Marker Topic: /skeleton_3d/connectors
           Queue Size: 100
           Value: true
         - Alpha: 1
@@ -83,7 +84,7 @@ Visualization Manager:
           Size (Pixels): 3
           Size (m): 0.03
           Style: Spheres
-          Topic: /skeleton_3D/keypoints
+          Topic: /skeleton_3d/keypoints
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: false
