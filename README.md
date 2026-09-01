@@ -142,6 +142,11 @@ all four at once, one `rqt_plot` window (degrees):
 rqt_plot /shared_control_node/diag/joint_deg/data[0]:data[1]:data[2]:data[3]
 ```
 
+To also see each joint's `[min, max]` range as a shaded band **in the
+same colour as its trace** (which `rqt_plot` cannot do), launch with
+`joint_plot:=true` -- it runs `plot_joint_angles.py`, a matplotlib
+window fed by `~diag/joint_deg` + the latched `~diag/joint_deg_limits`.
+
 Plus the FR3 model, and the **human arm as the visuo-tactile pipeline
 publishes it** -- this package does not draw the arm: `/skeleton_3d/keypoints`
 (`PointCloud`), `/skeleton_3d/connectors` (`Marker`), and the
@@ -158,7 +163,8 @@ rqt_plot /shared_control_node/diag/v_s/vector/x:y:z
 ```
 
 **Checking `joint_safety`** against the joints: `~diag/joint_deg` is
-`q1..q4` in degrees (the raw angles); `~diag/joint_rho` is the signed
+`q1..q4` in degrees (the raw angles), with `~diag/joint_deg_limits` =
+`[q1min,q1max,...,q4min,q4max]` deg (latched); `~diag/joint_rho` is the signed
 per-joint position `rho_i` in `[-1, 1]` (`0` mid-range, `+-1` at a
 limit) -- the exact quantity the factor penalises; `~diag/joint_margins`
 is `[m1..m4, min]` with `m_i = 1 - |rho_i|`.

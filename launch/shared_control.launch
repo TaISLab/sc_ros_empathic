@@ -107,8 +107,11 @@
   <arg name="show_vel_arrows" default="true"/>  <!-- v_h/v_r/v_s as arrows at the EE -->
   <arg name="show_eta_text"   default="true"/>  <!-- eta_h/eta_r/eta_s as floating text -->
   <arg name="vel_arrow_gain"  default="2.0"/>   <!-- metres of arrow per m/s -->
-  <!-- Human joint angles are NOT drawn in RViz: plot q1..q4 live with
-       rqt_plot /shared_control_node/diag/joint_deg/data[0]:data[1]:data[2]:data[3] (deg). -->
+  <!-- Human joint angles are NOT drawn in RViz. Quick view:
+         rqt_plot /shared_control_node/diag/joint_deg/data[0]:data[1]:data[2]:data[3]  (deg)
+       joint_plot:=true also opens plot_joint_angles.py -- q1..q4 with
+       each joint's [min,max] band in the SAME colour as its trace. -->
+  <arg name="joint_plot" default="false"/>
   <!-- Frame that ~diag/arm_points_fk (FK of q_h,l1,l2) is published in.
        The human arm itself is drawn by the pipeline, not this package. -->
   <arg name="human_shoulder_frame" default="base_shoulder"/>
@@ -218,6 +221,11 @@
   <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz"
         args="-d $(arg rviz_config)"/>
 
+  <!-- q1..q4 (deg) with each joint's [min,max] band in its own colour. -->
+  <node if="$(arg joint_plot)" pkg="sc_ros_empathic"
+        type="plot_joint_angles.py" name="sc_joint_angle_plot"
+        output="screen"/>
+
   <!-- ================= trial recording ================= -->
   <!-- OFF by default; record:=true starts it. Everything the offline
        Sec. V-D metric analysis needs: the raw robot/human inputs and
@@ -247,6 +255,7 @@
               /shared_control_node/diag/joint_rho
               /shared_control_node/diag/joint_deg
               /shared_control_node/diag/joint_limits
+              /shared_control_node/diag/joint_deg_limits
               /shared_control_node/diag/manipulability
               /shared_control_node/diag/path_progress
               /shared_control_node/diag/arm_points

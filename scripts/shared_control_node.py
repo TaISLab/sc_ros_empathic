@@ -496,6 +496,10 @@ class SharedControlNode(object):
             'joint_limits': rospy.Publisher('~diag/joint_limits',
                                              Float64MultiArray, queue_size=1,
                                              latch=True),
+            # same, in DEGREES -- reference lines for the joint_deg plot
+            'joint_deg_limits': rospy.Publisher('~diag/joint_deg_limits',
+                                                 Float64MultiArray, queue_size=1,
+                                                 latch=True),
             'manipulability': rospy.Publisher('~diag/manipulability', Float64,
                                                queue_size=1),
             'path_progress': rospy.Publisher('~diag/path_progress',
@@ -524,6 +528,8 @@ class SharedControlNode(object):
                else DEFAULT_JOINT_LIMITS)
         self.diag['joint_limits'].publish(Float64MultiArray(
             data=[float(v) for row in np.asarray(_jl) for v in row]))
+        self.diag['joint_deg_limits'].publish(Float64MultiArray(
+            data=[float(np.degrees(v)) for row in np.asarray(_jl) for v in row]))
 
         rospy.Service('~tare', Empty, self._tare_srv)
 
