@@ -162,13 +162,21 @@ class SharedControlNode(object):
             '~franka_states_topic', '/franka_state_controller/franka_states')
         self.cmd_topic = rospy.get_param(
             '~cmd_topic', '/robot_vel_ctrl/vel_cmd')
-        # PLACEHOLDER -- confirm with the visuo-tactile pipeline owner.
-        # Expected: sensor_msgs/JointState with position[0:4] = q1..q4
-        # (shoulder flex/ext, abd/add, int/ext rotation, elbow flex/ext).
+        # Visuo-tactile pipeline, layout confirmed 2026-09 with the
+        # pipeline owner: sensor_msgs/JointState with a NAMED 7-entry
+        # chain -- right_arm_q1, right_arm_q2, upperarm_length,
+        # right_arm_q3, right_arm_q4, forearm_length, right_arm_q5.
+        # The two *_length entries are prismatic "joints" carrying the
+        # LIVE bone-length estimates l1/l2 (m); right_arm_q5 (wrist
+        # pronation) is outside the 4-DoF safety model. We index q1..q4
+        # and l1,l2 BY NAME (see _human_joint_state_cb) -- a positional
+        # slice would feed upperarm_length in as q3 and drop the elbow.
         self.human_joint_state_topic = rospy.get_param(
             '~human_joint_state_topic', '/right_arm/joint_states')
-        # PLACEHOLDER -- confirm message type/layout. Expected:
-        # std_msgs/Float64MultiArray with data = [l1, l2] (m).
+        # Optional SEPARATE l1,l2 stream (std_msgs/Float64MultiArray,
+        # data = [l1, l2] m). Not needed with the pipeline above (l1,l2
+        # ride in ~human_joint_state_topic); kept for other rigs / as an
+        # override. Silent if the topic never publishes.
         self.human_link_lengths_topic = rospy.get_param(
             '~human_link_lengths_topic', '/right_arm/link_lengths')
         # PLACEHOLDER -- confirm with the visuo-tactile pipeline owner.
@@ -633,19 +641,49 @@ class SharedControlNode(object):
         rospy.logwarn('shared_control_node: re-taring on request.')
         return EmptyResponse()
 
+    # Human-arm chain, in priority order:
+    #   1. by name -- right_arm_q1..q4 + upperarm_length / forearm_length
+    #      (the visuo-tactile pipeline; robust to entry order).
+    #   2. positional 7-entry layout q1,q2,l1,q3,q4,l2,q5.
+    #   3. positional 4-entry layout q1..q4 (no l1,l2).
+    _Q_NAMES = ('right_arm_q1', 'right_arm_q2', 'right_arm_q3', 'right_arm_q4')
+    _L1_NAME = 'upperarm_length'
+    _L2_NAME = 'forearm_length'
+
     def _human_joint_state_cb(self, msg):
-        if len(msg.position) < 4:
+        pos = msg.position
+        idx = {n: i for i, n in enumerate(msg.name)} if msg.name else {}
+        l1 = l2 = None
+        if all(n in idx and idx[n] < len(pos) for n in self._Q_NAMES):
+            q = np.array([pos[idx[n]] for n in self._Q_NAMES])
+            if (self._L1_NAME in idx and self._L2_NAME in idx
+                    and idx[self._L1_NAME] < len(pos)
+                    and idx[self._L2_NAME] < len(pos)):
+                l1, l2 = float(pos[idx[self._L1_NAME]]), float(pos[idx[self._L2_NAME]])
+        elif len(pos) >= 7:
+            q = np.array([pos[0], pos[1], pos[3], pos[4]])   # q1,q2,q3,q4
+            l1, l2 = float(pos[2]), float(pos[5])            # upperarm, forearm
+        elif len(pos) >= 4:
+            q = np.array(pos[0:4])
+        else:
             rospy.logwarn_throttle(
-                5.0, 'shared_control_node: %s published %d positions '
-                '(need >= 4: q1..q4); ignoring.', self.human_joint_state_topic,
-                len(msg.position))
+                5.0, 'shared_control_node: %s published %d positions / names '
+                '%s -- cannot extract q1..q4; ignoring.',
+                self.human_joint_state_topic, len(pos), list(msg.name))
             return
+
+        now = rospy.Time.now()
         if self.q_h is None:
-            rospy.loginfo('shared_control_node: first q_h on %s = %s',
-                          self.human_joint_state_topic,
-                          np.round(msg.position[0:4], 3).tolist())
-        self.q_h = np.array(msg.position[0:4])
-        self.q_h_stamp = rospy.Time.now()
+            rospy.loginfo('shared_control_node: first q_h on %s = %s  l1,l2=%s',
+                          self.human_joint_state_topic, np.round(q, 3).tolist(),
+                          None if l1 is None else [round(l1, 3), round(l2, 3)])
+        self.q_h = q
+        self.q_h_stamp = now
+        # l1,l2 ride in this message for the pipeline chain -- treat them
+        # exactly like the separate ~human_link_lengths_topic stream.
+        if l1 is not None and l1 > 0.0 and l2 > 0.0:
+            self.l1, self.l2 = l1, l2
+            self.link_lengths_stamp = now
 
     def _human_link_lengths_cb(self, msg):
         if len(msg.data) < 2:
