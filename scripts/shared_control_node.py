@@ -351,15 +351,6 @@ class SharedControlNode(object):
         # volunteers -- it stays in config/shared_control.yaml.
         self.proximity_threshold = rospy.get_param('~proximity_threshold', 0.3)
 
-        # VISUALISATION ONLY: horizon (s) for ~diag/joint_deg_future =
-        # q_h + qdot_h * horizon, where qdot_h is the joint velocity the
-        # human candidate v_h induces via the arm Jacobian (exactly the
-        # quantity joint_safety's dynamic term scores). Not used by the
-        # controller; just makes "where is v_h pushing q3" visible on
-        # the joint plot. 0 -> the topic is not published.
-        self.joint_future_horizon_s = float(
-            rospy.get_param('~joint_future_horizon_s', 1.0))
-
         # Robot Jacobian for the manipulability factor.
         #   analytic (default) -- self-contained pure-numpy FR3 FK +
         #     Jacobian from q (fr3_model.py); per-candidate lookahead,
@@ -521,8 +512,10 @@ class SharedControlNode(object):
             # awkward): rqt_plot /shared_control_node/diag/joint_deg/data[0]:data[1]:data[2]:data[3]
             'joint_deg': rospy.Publisher('~diag/joint_deg', Float64MultiArray,
                                           queue_size=1),
-            # q1..q4 (deg) projected ~joint_future_horizon_s ahead along
-            # qdot_h (the v_h-induced joint velocity joint_safety scores)
+            # q1..q4 (deg) one controller lookahead (~dt_lookahead) ahead
+            # along qdot_h -- the v_h-induced joint velocity joint_safety
+            # scores, integrated over the same horizon the controller
+            # already uses for its lookahead prediction.
             'joint_deg_future': rospy.Publisher('~diag/joint_deg_future',
                                                  Float64MultiArray,
                                                  queue_size=1),
@@ -874,11 +867,15 @@ class SharedControlNode(object):
                                                   self.human_joint_limits)]))
             self.diag['joint_deg'].publish(Float64MultiArray(
                 data=[float(np.degrees(q)) for q in self.q_h[:4]]))
-            if self.joint_future_horizon_s > 0.0 and l1_cur is not None:
+            if l1_cur is not None:
+                # Extrapolate q_h along the joint velocity v_h induces
+                # (what joint_safety's dynamic term scores), over the
+                # controller's own lookahead horizon dt_lookahead.
                 J_arm = human_arm_jacobian(self.q_h, l1_cur, l2_cur)
                 qdot_h = cartesian_to_human_joint_velocity(
                     self.q_h, l1_cur, l2_cur, v_h, J=J_arm)
-                q_future = self.q_h[:4] + qdot_h[:4] * self.joint_future_horizon_s
+                q_future = (self.q_h[:4]
+                            + qdot_h[:4] * self.core.dt_lookahead)
                 self.diag['joint_deg_future'].publish(Float64MultiArray(
                     data=[float(np.degrees(q)) for q in q_future]))
 

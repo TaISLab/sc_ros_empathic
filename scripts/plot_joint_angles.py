@@ -16,9 +16,10 @@ enters its coloured band. NaN (condition without joint_safety, or no
 fresh human state) simply leaves a gap.
 
 Dashed traces (same colour per joint) are the FUTURE joint angles the
-human command v_h projects to -- q_h + qdot_h * horizon, the quantity
-joint_safety's dynamic term scores. A dashed trace heading into a band
-is what pulls eta3 down.
+human command v_h projects to -- q_h + qdot_h * dt_lookahead,
+extrapolating along the joint velocity v_h induces (the quantity
+joint_safety's dynamic term scores) over the controller's own
+lookahead horizon. A dashed trace heading into a band pulls eta3 down.
 
 Subscribes:
   ~joint_deg_topic         (std_msgs/Float64MultiArray, data = q1..q4 deg)
