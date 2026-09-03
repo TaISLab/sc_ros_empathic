@@ -190,14 +190,22 @@ When a joint's margin drops toward 0, `factors_h/data[2]`
 `~diag/joint_limits` is `[q1min,q1max,...,q4min,q4max]` (latched).
 
 **Angle convention.** `joint_limits` (and the DH arm model) assume
-`q_i = 0` at the goniometric neutral posture. If the visuo-tactile
-pipeline uses a different zero, `joint_safety` is scored against the
-wrong limits (symptom: one joint pinned near `rho = +-1` for the whole
-trial, `joint_safety` stuck near 0). Read `~diag/joint_deg` with the volunteer
-held at a known neutral pose and, per joint that is off, set
-`human_joint_offsets: [o1,o2,o3,o4]` (rad, subtracted from `q1..q4`) in
-`config/shared_control.yaml`. It shifts the limits **and** the arm
-Jacobian, so calibrate it before trusting a `joint_safety` trial.
+`q_i = 0` at the goniometric neutral, plus the model's own sign/scale
+(e.g. `q4 = 0` arm extended, positive as the elbow flexes). If the
+visuo-tactile pipeline differs, `joint_safety` is scored against the
+wrong limits (symptom: a joint pinned near `rho = +-1` all trial,
+`joint_safety` stuck near 0). Fix with the affine calibration in
+`config/shared_control.yaml`:
+
+```
+q_model = human_joint_gains * (q_pipeline - human_joint_offsets)
+```
+
+Read `~diag/joint_deg` at two known postures per joint that is off
+(model angles `qa`, `qb`): `gain = (qb-qa)/(q_pipe_b-q_pipe_a)`,
+`offset = q_pipe_a - qa/gain`. Defaults (offset 0, gain 1) leave `q`
+untouched. It shifts the limits **and** the arm Jacobian, so calibrate
+before trusting a `joint_safety` trial.
 
 ## Per-volunteer configuration
 

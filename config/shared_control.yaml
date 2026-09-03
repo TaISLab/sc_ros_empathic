@@ -96,13 +96,19 @@ proximity_threshold: 0.3
 # (performance.DEFAULT_JOINT_LIMITS) are used.
 # human_joint_limits: [-1.05, 3.14,  0.0, 3.14,  -1.57, 1.57,  0.0, 2.53]
 
-# Per-joint zero offset (rad), SUBTRACTED from the pipeline's q1..q4 so
-# its angle convention matches the DH model / joint_limits (q=0 at the
-# goniometric neutral). Property of the visuo-tactile pipeline, not the
-# volunteer. Affects the limits AND the arm Jacobian. Calibrate from a
-# known neutral posture (see README "Checking joint_safety"). Example:
-# pipeline reads q3 ~ pi/2 at neutral -> shift it back:
-# human_joint_offsets: [0.0, 0.0, 1.5708, 0.0]
+# Affine per-joint calibration of the pipeline's q1..q4:
+#     q_model = gain * (q_pipeline - offset)
+# so its convention matches the DH model / joint_limits (q=0 at the
+# goniometric neutral, plus the model's own sign/scale). Property of
+# the visuo-tactile pipeline, not the volunteer. Affects the limits AND
+# the arm Jacobian. Calibrate from two known postures a,b (model angles
+# qa,qb): gain=(qb-qa)/(q_pipe_b-q_pipe_a); offset=q_pipe_a-qa/gain.
+# Defaults leave q untouched. Examples:
+#   pipeline reads q3 ~ pi/2 at the model's neutral:
+#     human_joint_offsets: [0.0, 0.0, 1.5708, 0.0]
+#   q4: extended -> 0, fully flexed -> ~30 deg (read q_pipe at both):
+#     human_joint_offsets: [0.0, 0.0, 0.0, <q4_pipe_extended_rad>]
+#     human_joint_gains:   [1.0, 1.0, 1.0, <0.524/(q4_pipe_flexed - q4_pipe_extended)>]
 
 # --- Human-arm segment lengths ----------------------------------
 # The visuo-tactile pipeline is expected to publish time-varying
