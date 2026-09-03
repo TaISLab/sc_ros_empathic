@@ -10,7 +10,15 @@ Joint (i) | a_i | alpha_i |  d_i | theta_i
     1     |  0  |  pi/2   |   0  |   q1
     2     |  0  |  pi/2   |   0  |   q2
     3     |  0  | -pi/2   |  l1  |   q3
-    4     |  l2 |   0     |   0  |   q4
+    4     |  l2 |   0     |   0  |   pi/2 - q4
+
+q4 is the ELBOW FLEXION angle: q4 = 0 is the fully extended arm
+(forearm colinear with the upper arm), q4 > 0 flexes it (q4 ~ 145 deg
+fully flexed). The pi/2 - q4 in theta_4 is what makes q4 = 0 the
+straight arm -- joint 3's -pi/2 twist otherwise puts the forearm
+perpendicular to the upper arm at theta_4 = 0. This matches the sign
+and zero that DEFAULT_JOINT_LIMITS q4 = [0, 2.53] assumes and that the
+visuo-tactile pipeline reports.
 
 No ROS/KDL dependency: this module is only used to relate a candidate
 Cartesian velocity at the wrist to the corresponding human joint
@@ -19,7 +27,8 @@ factor needs. l1 (upper-arm length) and l2 (forearm length) are
 time-varying estimates coming from the visuo-tactile pipeline (bone
 length estimator).
 
-Ported verbatim from the offline simulation/verification package.
+Ported from the offline simulation/verification package (the elbow
+zero was corrected here: theta_4 = pi/2 - q4, not q4).
 """
 
 import numpy as np
@@ -40,13 +49,17 @@ def dh_transform(a, alpha, d, theta):
 
 
 def human_arm_dh_params(q, l1, l2):
-    """Return the list of (a, alpha, d, theta) tuples for q = [q1..q4]."""
+    """Return the list of (a, alpha, d, theta) tuples for q = [q1..q4].
+
+    theta_4 = pi/2 - q4 so that q4 is elbow flexion measured from the
+    extended arm (q4 = 0 -> straight); see the module docstring.
+    """
     q1, q2, q3, q4 = q
     return [
         (0.0, np.pi / 2, 0.0, q1),
         (0.0, np.pi / 2, 0.0, q2),
         (0.0, -np.pi / 2, l1, q3),
-        (l2, 0.0, 0.0, q4),
+        (l2, 0.0, 0.0, np.pi / 2 - q4),
     ]
 
 
