@@ -255,7 +255,9 @@
               /shared_control_node/diag/joint_margins
               /shared_control_node/diag/joint_rho
               /shared_control_node/diag/joint_deg
-              /shared_control_node/diag/joint_deg_future
+              /shared_control_node/diag/joint_deg_future_h
+              /shared_control_node/diag/joint_deg_future_r
+              /shared_control_node/diag/joint_deg_future_s
               /shared_control_node/diag/joint_limits
               /shared_control_node/diag/joint_deg_limits
               /shared_control_node/diag/manipulability

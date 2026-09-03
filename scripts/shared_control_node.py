@@ -513,12 +513,20 @@ class SharedControlNode(object):
             'joint_deg': rospy.Publisher('~diag/joint_deg', Float64MultiArray,
                                           queue_size=1),
             # q1..q4 (deg) one controller lookahead (~dt_lookahead) ahead
-            # along qdot_h -- the v_h-induced joint velocity joint_safety
-            # scores, integrated over the same horizon the controller
-            # already uses for its lookahead prediction.
-            'joint_deg_future': rospy.Publisher('~diag/joint_deg_future',
-                                                 Float64MultiArray,
-                                                 queue_size=1),
+            # along qdot_k -- the joint velocity each shared-control
+            # candidate command induces (k = h: v_h, r: v_r, s: the
+            # eta-weighted blend v_hat_s, BEFORE eta_s scales the
+            # output), i.e. what joint_safety's dynamic term scores for
+            # that candidate.
+            'joint_deg_future_h': rospy.Publisher('~diag/joint_deg_future_h',
+                                                   Float64MultiArray,
+                                                   queue_size=1),
+            'joint_deg_future_r': rospy.Publisher('~diag/joint_deg_future_r',
+                                                   Float64MultiArray,
+                                                   queue_size=1),
+            'joint_deg_future_s': rospy.Publisher('~diag/joint_deg_future_s',
+                                                   Float64MultiArray,
+                                                   queue_size=1),
             # [q1min,q1max, ...q4min,q4max] (rad), latched
             'joint_limits': rospy.Publisher('~diag/joint_limits',
                                              Float64MultiArray, queue_size=1,
@@ -831,7 +839,8 @@ class SharedControlNode(object):
         return pa
 
     def _publish_diag(self, stamp, v_h, v_r, v_s, factors_h, factors_r,
-                       s_near, lap, cross_track, human_fresh, l1_cur, l2_cur):
+                       s_near, lap, cross_track, human_fresh, l1_cur, l2_cur,
+                       v_hat_s=None):
         def vec3(pub_key, v):
             m = Vector3Stamped()
             m.header.stamp = stamp
@@ -868,16 +877,23 @@ class SharedControlNode(object):
             self.diag['joint_deg'].publish(Float64MultiArray(
                 data=[float(np.degrees(q)) for q in self.q_h[:4]]))
             if l1_cur is not None:
-                # Extrapolate q_h along the joint velocity v_h induces
-                # (what joint_safety's dynamic term scores), over the
-                # controller's own lookahead horizon dt_lookahead.
+                # Extrapolate q_h along the joint velocity each candidate
+                # command (v_h, v_r, v_hat_s) induces -- what
+                # joint_safety's dynamic term scores -- over the
+                # controller's own lookahead horizon dt_lookahead. One
+                # arm Jacobian, reused across the three (as core.step does).
                 J_arm = human_arm_jacobian(self.q_h, l1_cur, l2_cur)
-                qdot_h = cartesian_to_human_joint_velocity(
-                    self.q_h, l1_cur, l2_cur, v_h, J=J_arm)
-                q_future = (self.q_h[:4]
-                            + qdot_h[:4] * self.core.dt_lookahead)
-                self.diag['joint_deg_future'].publish(Float64MultiArray(
-                    data=[float(np.degrees(q)) for q in q_future]))
+                dtl = self.core.dt_lookahead
+                for key, v_k in (('joint_deg_future_h', v_h),
+                                 ('joint_deg_future_r', v_r),
+                                 ('joint_deg_future_s', v_hat_s)):
+                    if v_k is None:
+                        continue
+                    qdot_k = cartesian_to_human_joint_velocity(
+                        self.q_h, l1_cur, l2_cur, v_k, J=J_arm)
+                    q_future = self.q_h[:4] + qdot_k[:4] * dtl
+                    self.diag[key].publish(Float64MultiArray(
+                        data=[float(np.degrees(q)) for q in q_future]))
 
         if self.manipulability_available and self.J_robot is not None:
             self.diag['manipulability'].publish(
@@ -1060,6 +1076,7 @@ class SharedControlNode(object):
                 self.J_robot = self.core.robot_model.jacobian(self.q_robot)
 
             l1_cur, l2_cur = self._current_link_lengths()
+            v_hat_s = None
             if self.cond_use_robot:
                 v_s, info = self.core.step(
                     self.v_h, v_r, tangent,
@@ -1072,6 +1089,7 @@ class SharedControlNode(object):
                 eta_h, eta_r, eta_s = (info['eta_h'], info['eta_r'],
                                        info['eta_s'])
                 factors_h, factors_r = info['factors_h'], info['factors_r']
+                v_hat_s = info['v_hat_s']   # blend before eta_s scales it
             else:
                 # Condition A: no assistance. Shape v_h only; the core
                 # blend / eta_s pass are bypassed by design.
@@ -1100,7 +1118,7 @@ class SharedControlNode(object):
 
             self._publish_diag(stamp, self.v_h, v_r, v_s, factors_h,
                                 factors_r, s_near, lap, cross_track,
-                                human_fresh, l1_cur, l2_cur)
+                                human_fresh, l1_cur, l2_cur, v_hat_s)
 
             if self.csv_w is not None:
                 self._write_csv_row(stamp, s_near, lap, cross_track, v_r, v_s,

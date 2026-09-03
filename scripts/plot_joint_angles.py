@@ -9,42 +9,30 @@ as the joint's trace -- the colour match rqt_plot cannot do.
   q1  shoulder flex/ext      q3  shoulder int/ext rotation
   q2  shoulder abd/add       q4  elbow flex/ext
 
-A second y-axis (right) carries the human joint-safety efficiency
-factor -- factors_h[2], "joint_safety", in (0, 1]: 1 = no joint-limit
-penalty, -> 0 as any joint nears a limit. Watch it drop as a trace
-enters its coloured band. NaN (condition without joint_safety, or no
-fresh human state) simply leaves a gap.
+Per joint, four traces in that joint's colour:
+  solid    measured q_i (~diag/joint_deg)
+  dashed   q_i extrapolated along the velocity the HUMAN command v_h
+           induces          (~diag/joint_deg_future_h)
+  dotted   ... the ROBOT command v_r induces
+                            (~diag/joint_deg_future_r)
+  dash-dot ... the eta-weighted BLEND v_hat_s induces, before eta_s
+           scales the output (~diag/joint_deg_future_s)
+Each future trace is q_h + qdot_k * dt_lookahead: qdot_k is what
+joint_safety's dynamic term scores for candidate k, over the
+controller's own lookahead horizon.
 
-Dashed traces (same colour per joint) are the FUTURE joint angles the
-human command v_h projects to -- q_h + qdot_h * dt_lookahead,
-extrapolating along the joint velocity v_h induces (the quantity
-joint_safety's dynamic term scores) over the controller's own
-lookahead horizon. A dashed trace heading into a band pulls eta3 down.
-
-Subscribes:
-  ~joint_deg_topic         (std_msgs/Float64MultiArray, data = q1..q4 deg)
-      default /shared_control_node/diag/joint_deg
-  ~joint_deg_future_topic  (std_msgs/Float64MultiArray, data = q1..q4 deg)
-      default /shared_control_node/diag/joint_deg_future
-  ~joint_deg_limits_topic  (std_msgs/Float64MultiArray, latched,
-                            data = [q1min,q1max, ... q4min,q4max] deg)
-      default /shared_control_node/diag/joint_deg_limits
-  ~factors_h_topic         (std_msgs/Float64MultiArray, data =
-                            [smoothness, directness, joint_safety, manip])
-      default /shared_control_node/diag/factors_h
+A second y-axis (right) carries the three shared-control efficiencies
+eta_h / eta_r / eta_s (~eta), same dashed / dotted / dash-dot key,
+in black.
 
 Params:
-  ~window_s          rolling time window shown (s), default 30
-  ~redraw_hz         figure redraw rate (Hz),      default 15
-  ~show_joint_safety draw the eta3 trace,          default true
-  ~show_future       draw the dashed v_h-projection traces, default true
-
-For the raw time series without the bands, rqt_plot is still fine:
-  rqt_plot /shared_control_node/diag/joint_deg/data[0]:data[1]:data[2]:data[3]
+  ~window_s     rolling time window shown (s), default 30
+  ~redraw_hz    figure redraw rate (Hz),      default 15
+  ~show_future  draw the 3 extrapolation sets, default true
+  ~show_eta     draw eta_h/eta_r/eta_s,        default true
 """
 
 import collections
-import math
 import threading
 
 import rospy
@@ -52,12 +40,22 @@ from std_msgs.msg import Float64MultiArray
 
 import matplotlib.pyplot as plt
 
-# q1..q4 colours -- reused for the trace, the band and the limit lines.
+# q1..q4 colours -- reused for every trace and the limit band of a joint.
 JOINT_COLOURS = ('#1f77b4', '#d62728', '#2ca02c', '#9467bd')
 JOINT_LABELS = ('q1 shoulder flex/ext', 'q2 shoulder abd/add',
                 'q3 shoulder rot', 'q4 elbow')
-ETA3_COLOUR = '#111111'
-FACTORS_H_JOINT_SAFETY_IDX = 2   # [smoothness, directness, joint_safety, manip]
+ETA_COLOUR = '#111111'
+# candidate command -> line style (measured q_h is 'solid')
+STYLE = {'meas': '-', 'h': '--', 'r': ':', 's': '-.'}
+STYLE_LABEL = {'meas': 'measured', 'h': 'v_h projection',
+               'r': 'v_r projection', 's': 'v_sum projection'}
+
+
+class _MT(object):
+    """A time series of n parallel channels held in rolling deques."""
+    def __init__(self, n):
+        self.t = collections.deque()
+        self.v = [collections.deque() for _ in range(n)]
 
 
 class JointAnglePlot(object):
@@ -66,113 +64,132 @@ class JointAnglePlot(object):
 
         self.window_s = float(rospy.get_param('~window_s', 30.0))
         self.redraw_hz = float(rospy.get_param('~redraw_hz', 15.0))
-        self.show_eta3 = bool(rospy.get_param('~show_joint_safety', True))
         self.show_future = bool(rospy.get_param('~show_future', True))
-        deg_topic = rospy.get_param(
-            '~joint_deg_topic', '/shared_control_node/diag/joint_deg')
-        fut_topic = rospy.get_param(
-            '~joint_deg_future_topic',
-            '/shared_control_node/diag/joint_deg_future')
-        lim_topic = rospy.get_param(
-            '~joint_deg_limits_topic',
-            '/shared_control_node/diag/joint_deg_limits')
-        fh_topic = rospy.get_param(
-            '~factors_h_topic', '/shared_control_node/diag/factors_h')
+        self.show_eta = bool(rospy.get_param('~show_eta', True))
+
+        base = '/shared_control_node'
+        deg_topic = rospy.get_param('~joint_deg_topic', base + '/diag/joint_deg')
+        fut_topics = {
+            'h': rospy.get_param('~joint_deg_future_h_topic',
+                                 base + '/diag/joint_deg_future_h'),
+            'r': rospy.get_param('~joint_deg_future_r_topic',
+                                 base + '/diag/joint_deg_future_r'),
+            's': rospy.get_param('~joint_deg_future_s_topic',
+                                 base + '/diag/joint_deg_future_s'),
+        }
+        lim_topic = rospy.get_param('~joint_deg_limits_topic',
+                                    base + '/diag/joint_deg_limits')
+        eta_topic = rospy.get_param('~eta_topic', base + '/eta')
 
         # ROS delivers each callback on its own thread; the draw loop
         # runs on the main thread. All deque access is under this lock
-        # (otherwise a mid-snapshot append leaves the x/y arrays one
-        # sample apart and matplotlib raises a broadcast error).
+        # (a mid-snapshot append otherwise leaves x/y one sample apart
+        # and matplotlib raises a broadcast error).
         self._lock = threading.Lock()
-        self.t = collections.deque()
-        self.q = [collections.deque() for _ in range(4)]
-        self.limits = None            # [(min,max)] x4, degrees
         self._t0 = None
-        # Future (v_h projection) and eta3 each keep their own (t, value)
-        # history: separate topics, either may be absent for whole runs.
-        self.qf_t = collections.deque()
-        self.qf = [collections.deque() for _ in range(4)]
-        self.eta3_t = collections.deque()
-        self.eta3 = collections.deque()
+        self.limits = None                 # [(min,max)] x4, degrees
+        self.meas = _MT(4)
+        self.fut = {k: _MT(4) for k in ('h', 'r', 's')}
+        self.eta = _MT(3)
 
         rospy.Subscriber(deg_topic, Float64MultiArray, self._deg_cb,
                          queue_size=5)
         rospy.Subscriber(lim_topic, Float64MultiArray, self._lim_cb,
                          queue_size=1)
         if self.show_future:
-            rospy.Subscriber(fut_topic, Float64MultiArray, self._fut_cb,
-                             queue_size=5)
-        if self.show_eta3:
-            rospy.Subscriber(fh_topic, Float64MultiArray, self._fh_cb,
+            for k, topic in fut_topics.items():
+                rospy.Subscriber(topic, Float64MultiArray,
+                                 lambda m, kk=k: self._fut_cb(kk, m),
+                                 queue_size=5)
+        if self.show_eta:
+            rospy.Subscriber(eta_topic, Float64MultiArray, self._eta_cb,
                              queue_size=5)
 
-        self.fig, self.ax = plt.subplots(figsize=(9, 5))
+        self.fig, self.ax = plt.subplots(figsize=(10, 5.5))
         self.ax.set_xlabel('t (s)')
         self.ax.set_ylabel('joint angle (deg)')
         self.ax.set_title('Human joint angles vs limits')
-        self.lines = [
-            self.ax.plot([], [], color=JOINT_COLOURS[i], lw=1.6,
-                         label=JOINT_LABELS[i])[0]
-            for i in range(4)
-        ]
-        self.fut_lines = []
-        if self.show_future:
-            self.fut_lines = [
-                self.ax.plot([], [], color=JOINT_COLOURS[i], lw=1.3,
-                             ls='--', alpha=0.9)[0]
-                for i in range(4)
-            ]
-        self._band_artists = []
         self.ax.grid(True, alpha=0.3)
 
-        self.ax2 = None
-        self.eta3_line = None
-        if self.show_eta3:
-            self.ax2 = self.ax.twinx()
-            self.ax2.set_ylabel('eta3  joint_safety')
-            self.ax2.set_ylim(-0.02, 1.05)
-            (self.eta3_line,) = self.ax2.plot(
-                [], [], color=ETA3_COLOUR, lw=2.2, ls='-',
-                label='eta3 joint_safety')
+        self.meas_lines = [
+            self.ax.plot([], [], color=JOINT_COLOURS[i], lw=1.7,
+                         ls=STYLE['meas'])[0]
+            for i in range(4)
+        ]
+        self.fut_lines = {}
+        if self.show_future:
+            for k in ('h', 'r', 's'):
+                self.fut_lines[k] = [
+                    self.ax.plot([], [], color=JOINT_COLOURS[i], lw=1.2,
+                                 ls=STYLE[k], alpha=0.9)[0]
+                    for i in range(4)
+                ]
 
-        handles = list(self.lines)
-        if self.fut_lines:
-            handles.append(plt.Line2D([], [], color='#666666', lw=1.3,
-                                      ls='--', label='v_h projection (future)'))
-        if self.eta3_line is not None:
-            handles.append(self.eta3_line)
-        self.ax.legend(handles=handles, loc='upper left', fontsize=8, ncol=2)
+        self.ax2 = None
+        self.eta_lines = []
+        if self.show_eta:
+            self.ax2 = self.ax.twinx()
+            self.ax2.set_ylabel('eta_h / eta_r / eta_s')
+            self.ax2.set_ylim(-0.02, 1.05)
+            for j, k in enumerate(('h', 'r', 's')):
+                (ln,) = self.ax2.plot([], [], color=ETA_COLOUR, lw=2.0,
+                                      ls=STYLE[k])
+                self.eta_lines.append(ln)
+
+        self._band_artists = []
+        self._build_legend()
+
+    # ---- legend -----------------------------------------------------
+    def _build_legend(self):
+        handles = [plt.Line2D([], [], color=JOINT_COLOURS[i], lw=2,
+                              label=JOINT_LABELS[i]) for i in range(4)]
+        keys = ['meas'] + (['h', 'r', 's'] if self.show_future else [])
+        for k in keys:
+            handles.append(plt.Line2D([], [], color='#666666', lw=1.5,
+                                      ls=STYLE[k], label=STYLE_LABEL[k]))
+        if self.show_eta:
+            for k in ('h', 'r', 's'):
+                handles.append(plt.Line2D([], [], color=ETA_COLOUR, lw=2,
+                                          ls=STYLE[k], label='eta_' + k))
+        self.ax.legend(handles=handles, loc='upper left', fontsize=7, ncol=3)
+
+    # ---- callbacks ------------------------------------------------
+    def _elapsed(self):
+        now = rospy.Time.now().to_sec()
+        if self._t0 is None:
+            self._t0 = now
+        return now - self._t0
+
+    def _push(self, mt, vals):
+        mt.t.append(self._elapsed())
+        for i, x in enumerate(vals):
+            mt.v[i].append(x)
+        cutoff = mt.t[-1] - self.window_s
+        while mt.t and mt.t[0] < cutoff:
+            mt.t.popleft()
+            for d in mt.v:
+                d.popleft()
 
     def _deg_cb(self, msg):
         if len(msg.data) < 4:
             return
         vals = [float(msg.data[i]) for i in range(4)]
         with self._lock:
-            self.t.append(self._elapsed())
-            for i in range(4):
-                self.q[i].append(vals[i])
-            self._trim(self.t, self.q)
+            self._push(self.meas, vals)
 
-    def _fut_cb(self, msg):
+    def _fut_cb(self, key, msg):
         if len(msg.data) < 4:
             return
         vals = [float(msg.data[i]) for i in range(4)]
         with self._lock:
-            self.qf_t.append(self._elapsed())
-            for i in range(4):
-                self.qf[i].append(vals[i])
-            self._trim(self.qf_t, self.qf)
+            self._push(self.fut[key], vals)
 
-    def _fh_cb(self, msg):
-        if len(msg.data) <= FACTORS_H_JOINT_SAFETY_IDX:
+    def _eta_cb(self, msg):
+        if len(msg.data) < 3:
             return
-        v = float(msg.data[FACTORS_H_JOINT_SAFETY_IDX])
-        if not math.isfinite(v):
-            return
+        vals = [float(msg.data[i]) for i in range(3)]
         with self._lock:
-            self.eta3_t.append(self._elapsed())
-            self.eta3.append(v)
-            self._trim(self.eta3_t, [self.eta3])
+            self._push(self.eta, vals)
 
     def _lim_cb(self, msg):
         if len(msg.data) >= 8:
@@ -181,21 +198,7 @@ class JointAnglePlot(object):
             with self._lock:
                 self.limits = lims
 
-    def _elapsed(self):
-        now = rospy.Time.now().to_sec()
-        if self._t0 is None:
-            self._t0 = now
-        return now - self._t0
-
-    def _trim(self, tq, series):
-        if not tq:
-            return
-        cutoff = tq[-1] - self.window_s
-        while tq and tq[0] < cutoff:
-            tq.popleft()
-            for s in series:
-                s.popleft()
-
+    # ---- draw ---------------------------------------------------
     def _draw_bands(self, limits):
         for a in self._band_artists:
             a.remove()
@@ -205,41 +208,45 @@ class JointAnglePlot(object):
         for i, (lo, hi) in enumerate(limits):
             c = JOINT_COLOURS[i]
             self._band_artists.append(
-                self.ax.axhspan(lo, hi, color=c, alpha=0.08, zorder=0))
+                self.ax.axhspan(lo, hi, color=c, alpha=0.07, zorder=0))
             for y in (lo, hi):
                 self._band_artists.append(
-                    self.ax.axhline(y, color=c, ls='--', lw=1.0, alpha=0.7,
+                    self.ax.axhline(y, color=c, ls='--', lw=1.0, alpha=0.6,
                                     zorder=1))
 
+    @staticmethod
+    def _set(line, t, v):
+        n = min(len(t), len(v))
+        line.set_data(t[:n], v[:n])
+
     def _snapshot(self):
-        """Consistent copy of the plot data, taken under the lock."""
         with self._lock:
-            tt = list(self.t)
-            qq = [list(d) for d in self.q]
-            ft = list(self.qf_t)
-            ff = [list(d) for d in self.qf]
-            e_t = list(self.eta3_t)
-            e_v = list(self.eta3)
+            def cp(mt):
+                return list(mt.t), [list(d) for d in mt.v]
+            meas = cp(self.meas)
+            fut = {k: cp(self.fut[k]) for k in self.fut} if self.show_future \
+                else {}
+            eta = cp(self.eta) if self.show_eta else ([], [])
             lims = list(self.limits) if self.limits else None
-        return tt, qq, ft, ff, e_t, e_v, lims
+        return meas, fut, eta, lims
 
     def spin(self):
         plt.ion()
         plt.show()
         rate = rospy.Rate(self.redraw_hz)
         while not rospy.is_shutdown():
-            tt, qq, ft, ff, e_t, e_v, lims = self._snapshot()
-            last = max((s[-1] for s in (tt, ft, e_t) if s), default=None)
+            meas, fut, eta, lims = self._snapshot()
+            all_t = [meas[0]] + [fut[k][0] for k in fut] + [eta[0]]
+            last = max((s[-1] for s in all_t if s), default=None)
             if last is not None:
                 for i in range(4):
-                    n = min(len(tt), len(qq[i]))
-                    self.lines[i].set_data(tt[:n], qq[i][:n])
-                for i, ln in enumerate(self.fut_lines):
-                    n = min(len(ft), len(ff[i]))
-                    ln.set_data(ft[:n], ff[i][:n])
-                if self.eta3_line is not None and e_t:
-                    n = min(len(e_t), len(e_v))
-                    self.eta3_line.set_data(e_t[:n], e_v[:n])
+                    self._set(self.meas_lines[i], meas[0], meas[1][i])
+                for k, lines in self.fut_lines.items():
+                    ft, fv = fut[k]
+                    for i in range(4):
+                        self._set(lines[i], ft, fv[i])
+                for j, ln in enumerate(self.eta_lines):
+                    self._set(ln, eta[0], eta[1][j])
                 self._draw_bands(lims)
                 self.ax.set_xlim(max(0.0, last - self.window_s),
                                  max(self.window_s, last))

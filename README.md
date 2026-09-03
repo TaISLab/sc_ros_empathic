@@ -146,15 +146,16 @@ To also see each joint's `[min, max]` range as a shaded band **in the
 same colour as its trace** (which `rqt_plot` cannot do), launch with
 `joint_plot:=true` -- it runs `plot_joint_angles.py`, a matplotlib
 window fed by `~diag/joint_deg` + the latched `~diag/joint_deg_limits`.
-A right-hand axis on that window carries the **human joint-safety
-efficiency** `factors_h[2]` (`joint_safety`, in `(0, 1]`) so you see it
-fall as a joint trace enters its band; `show_joint_safety:=false` drops
-it. **Dashed traces** (same colour per joint) are the future angles the
-human command `v_h` projects to -- `q_h + qdot_h * dt_lookahead`
-(`~diag/joint_deg_future`), extrapolating along the joint velocity
-`v_h` induces (the quantity `joint_safety`'s dynamic term scores) over
-the controller's own `~dt_lookahead` horizon; a dashed trace heading
-into a band is what pulls `eta3` down. `show_future:=false` drops them.
+Per joint, four traces in that joint's colour: **solid** = measured
+`q_i`; **dashed** / **dotted** / **dash-dot** = `q_i` extrapolated
+`dt_lookahead` ahead along the joint velocity the `v_h` / `v_r` /
+blend-`v_hat_s` candidate commands induce
+(`~diag/joint_deg_future_{h,r,s}`, before `eta_s` scales the output) --
+i.e. what `joint_safety`'s dynamic term scores for each candidate. A
+future trace heading into a band is what pulls that candidate's `eta`
+down. The right-hand axis carries the three efficiencies **`eta_h` /
+`eta_r` / `eta_s`** (`~eta`) with the same dashed / dotted / dash-dot
+key, in black. `show_future:=false` / `show_eta:=false` drop them.
 
 Plus the FR3 model, and the **human arm as the visuo-tactile pipeline
 publishes it** -- this package does not draw the arm: `/skeleton_3d/keypoints`
@@ -190,7 +191,7 @@ When a joint's margin drops toward 0, `factors_h/data[2]`
 `q_i = 0` at the goniometric neutral posture. If the visuo-tactile
 pipeline uses a different zero, `joint_safety` is scored against the
 wrong limits (symptom: one joint pinned near `rho = +-1` for the whole
-trial, `eta3` stuck near 0). Read `~diag/joint_deg` with the volunteer
+trial, `joint_safety` stuck near 0). Read `~diag/joint_deg` with the volunteer
 held at a known neutral pose and, per joint that is off, set
 `human_joint_offsets: [o1,o2,o3,o4]` (rad, subtracted from `q1..q4`) in
 `config/shared_control.yaml`. It shifts the limits **and** the arm
