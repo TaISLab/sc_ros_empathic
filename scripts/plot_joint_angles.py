@@ -3,7 +3,7 @@
 plot_joint_angles.py
 --------------------
 Live plot of the human arm's joint angles, one SUBPLOT per joint plus a
-final subplot for the efficiencies (shared time axis).
+final subplot for the joint-limit-safety efficiency (shared time axis).
 
   q1  shoulder flex/ext      q3  shoulder int/ext rotation
   q2  shoulder abd/add       q4  elbow flex/ext (0 = extended)
@@ -21,14 +21,15 @@ joint_safety's dynamic term scores for candidate k, over the
 controller's own lookahead horizon. The joint's [min, max] range is a
 shaded band in the same subplot.
 
-Efficiencies subplot: the three shared-control efficiencies
-eta_h / eta_r / eta_s (~eta).
+Efficiency subplot: ONLY the joint-limit-safety factor (factors_*[2],
+"joint_safety", in (0, 1]) for each candidate -- js_h / js_r / js_s
+from ~diag/factors_{h,r,s} -- not the full weighted eta_h/eta_r/eta_s.
 
 Params:
-  ~window_s     rolling time window shown (s), default 30
-  ~redraw_hz    figure redraw rate (Hz),      default 15
-  ~show_future  draw the 3 extrapolation traces, default true
-  ~show_eta     draw the efficiencies subplot,   default true
+  ~window_s           rolling time window shown (s), default 30
+  ~redraw_hz          figure redraw rate (Hz),      default 15
+  ~show_future        draw the 3 extrapolation traces, default true
+  ~show_joint_safety  draw the joint_safety subplot,   default true
 """
 
 import collections
@@ -43,11 +44,13 @@ import matplotlib.pyplot as plt
 JOINT_COLOURS = ('#1f77b4', '#d62728', '#2ca02c', '#9467bd')
 JOINT_LABELS = ('q1 shoulder flex/ext', 'q2 shoulder abd/add',
                 'q3 shoulder int/ext rot', 'q4 elbow (0=extended)')
-ETA_COLOURS = {'h': '#1b9e77', 'r': '#7570b3', 's': '#d95f02'}
+# joint_safety factor per candidate -> colour
+JS_COLOURS = {'h': '#1b9e77', 'r': '#7570b3', 's': '#d95f02'}
 # candidate command -> line style (measured q_h is 'solid')
 STYLE = {'meas': '-', 'h': '--', 'r': ':', 's': '-.'}
 STYLE_LABEL = {'meas': 'measured', 'h': 'v_h projection',
                'r': 'v_r projection', 's': 'v_sum projection'}
+FACTOR_JOINT_SAFETY_IDX = 2   # [smoothness, directness, joint_safety, manip]
 
 
 class _MT(object):
@@ -64,7 +67,7 @@ class JointAnglePlot(object):
         self.window_s = float(rospy.get_param('~window_s', 30.0))
         self.redraw_hz = float(rospy.get_param('~redraw_hz', 15.0))
         self.show_future = bool(rospy.get_param('~show_future', True))
-        self.show_eta = bool(rospy.get_param('~show_eta', True))
+        self.show_js = bool(rospy.get_param('~show_joint_safety', True))
 
         base = '/shared_control_node'
         deg_topic = rospy.get_param('~joint_deg_topic', base + '/diag/joint_deg')
@@ -76,9 +79,13 @@ class JointAnglePlot(object):
             's': rospy.get_param('~joint_deg_future_s_topic',
                                  base + '/diag/joint_deg_future_s'),
         }
+        fac_topics = {
+            'h': rospy.get_param('~factors_h_topic', base + '/diag/factors_h'),
+            'r': rospy.get_param('~factors_r_topic', base + '/diag/factors_r'),
+            's': rospy.get_param('~factors_s_topic', base + '/diag/factors_s'),
+        }
         lim_topic = rospy.get_param('~joint_deg_limits_topic',
                                     base + '/diag/joint_deg_limits')
-        eta_topic = rospy.get_param('~eta_topic', base + '/eta')
 
         # ROS delivers each callback on its own thread; the draw loop
         # runs on the main thread. All deque access is under this lock
@@ -89,7 +96,7 @@ class JointAnglePlot(object):
         self.limits = None                 # [(min,max)] x4, degrees
         self.meas = _MT(4)
         self.fut = {k: _MT(4) for k in ('h', 'r', 's')}
-        self.eta = _MT(3)
+        self.js = {k: _MT(1) for k in ('h', 'r', 's')}
 
         rospy.Subscriber(deg_topic, Float64MultiArray, self._deg_cb,
                          queue_size=5)
@@ -100,16 +107,18 @@ class JointAnglePlot(object):
                 rospy.Subscriber(topic, Float64MultiArray,
                                  lambda m, kk=k: self._fut_cb(kk, m),
                                  queue_size=5)
-        if self.show_eta:
-            rospy.Subscriber(eta_topic, Float64MultiArray, self._eta_cb,
-                             queue_size=5)
+        if self.show_js:
+            for k, topic in fac_topics.items():
+                rospy.Subscriber(topic, Float64MultiArray,
+                                 lambda m, kk=k: self._js_cb(kk, m),
+                                 queue_size=5)
 
-        nrows = 5 if self.show_eta else 4
+        nrows = 5 if self.show_js else 4
         self.fig, axs = plt.subplots(
             nrows, 1, sharex=True, figsize=(9, 2.0 * nrows + 1),
             constrained_layout=True)
         self.jaxs = list(axs[:4])
-        self.eax = axs[4] if self.show_eta else None
+        self.jsax = axs[4] if self.show_js else None
         self.fig.suptitle('Human joint angles vs limits')
 
         self.meas_lines = []
@@ -128,20 +137,18 @@ class JointAnglePlot(object):
                                 alpha=0.9)[0])
         self.jaxs[-1].set_xlabel('t (s)')
 
-        if self.show_eta:
-            self.eax.set_ylabel('efficiency', fontsize=8)
-            self.eax.set_ylim(-0.02, 1.05)
-            self.eax.grid(True, alpha=0.3)
-            self.eax.set_xlabel('t (s)')
+        self.js_lines = {}
+        if self.show_js:
+            self.jsax.set_ylabel('joint_safety\n(0..1)', fontsize=8)
+            self.jsax.set_ylim(-0.02, 1.05)
+            self.jsax.grid(True, alpha=0.3)
+            self.jsax.set_xlabel('t (s)')
             self.jaxs[-1].set_xlabel('')
-            self.eta_lines = [
-                self.eax.plot([], [], color=ETA_COLOURS[k], lw=1.8,
-                              label='eta_' + k)[0]
-                for k in ('h', 'r', 's')
-            ]
-            self.eax.legend(loc='lower left', fontsize=8, ncol=3)
-        else:
-            self.eta_lines = []
+            for k in ('h', 'r', 's'):
+                (ln,) = self.jsax.plot([], [], color=JS_COLOURS[k], lw=1.8,
+                                       ls=STYLE[k], label='js_' + k)
+                self.js_lines[k] = ln
+            self.jsax.legend(loc='lower left', fontsize=8, ncol=3)
 
         # style key -- once, on the top joint subplot
         keys = ['meas'] + (['h', 'r', 's'] if self.show_future else [])
@@ -183,12 +190,11 @@ class JointAnglePlot(object):
         with self._lock:
             self._push(self.fut[key], vals)
 
-    def _eta_cb(self, msg):
-        if len(msg.data) < 3:
+    def _js_cb(self, key, msg):
+        if len(msg.data) <= FACTOR_JOINT_SAFETY_IDX:
             return
-        vals = [float(msg.data[i]) for i in range(3)]
         with self._lock:
-            self._push(self.eta, vals)
+            self._push(self.js[key], [float(msg.data[FACTOR_JOINT_SAFETY_IDX])])
 
     def _lim_cb(self, msg):
         if len(msg.data) >= 8:
@@ -225,17 +231,18 @@ class JointAnglePlot(object):
             meas = cp(self.meas)
             fut = {k: cp(self.fut[k]) for k in self.fut} if self.show_future \
                 else {}
-            eta = cp(self.eta) if self.show_eta else ([], [])
+            js = {k: cp(self.js[k]) for k in self.js} if self.show_js else {}
             lims = list(self.limits) if self.limits else None
-        return meas, fut, eta, lims
+        return meas, fut, js, lims
 
     def spin(self):
         plt.ion()
         plt.show()
         rate = rospy.Rate(self.redraw_hz)
         while not rospy.is_shutdown():
-            meas, fut, eta, lims = self._snapshot()
-            all_t = [meas[0]] + [fut[k][0] for k in fut] + [eta[0]]
+            meas, fut, js, lims = self._snapshot()
+            all_t = ([meas[0]] + [fut[k][0] for k in fut]
+                     + [js[k][0] for k in js])
             last = max((s[-1] for s in all_t if s), default=None)
             if last is not None:
                 for i in range(4):
@@ -243,8 +250,9 @@ class JointAnglePlot(object):
                     for k in self.fut_lines:
                         ft, fv = fut[k]
                         self._set(self.fut_lines[k][i], ft, fv[i])
-                for j, ln in enumerate(self.eta_lines):
-                    self._set(ln, eta[0], eta[1][j])
+                for k, ln in self.js_lines.items():
+                    jt, jv = js[k]
+                    self._set(ln, jt, jv[0])
                 self._draw_bands(lims)
                 self.jaxs[0].set_xlim(max(0.0, last - self.window_s),
                                       max(self.window_s, last))

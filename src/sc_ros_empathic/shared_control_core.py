@@ -101,4 +101,5 @@ class SharedControlCore(object):
         self.v_prev = v_out
         return v_out, {"eta_h": eta_h, "eta_r": eta_r, "eta_s": eta_s,
                         "factors_h": factors_h, "factors_r": factors_r,
+                        "factors_s": factors_s,
                         "v_hat_s": v_hat_s}

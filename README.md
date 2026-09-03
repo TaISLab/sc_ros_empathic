@@ -153,9 +153,11 @@ extrapolated `dt_lookahead` ahead along the joint velocity the `v_h` /
 scales the output) -- what `joint_safety`'s dynamic term scores for
 each candidate; the joint's `[min, max]` range is the shaded band. A
 future trace heading into the band is what pulls that candidate's
-`eta` down. The last subplot carries the three efficiencies **`eta_h`
-/ `eta_r` / `eta_s`** (`~eta`). `show_future:=false` /
-`show_eta:=false` drop the projections / the efficiency subplot.
+`joint_safety` down. The last subplot carries **only the
+joint-limit-safety factor** for each candidate -- `js_h` / `js_r` /
+`js_s` = `factors_{h,r,s}[2]` (`joint_safety`, in `(0, 1]`), not the
+full weighted `eta`. `show_future:=false` / `show_joint_safety:=false`
+drop the projections / the safety subplot.
 
 Plus the FR3 model, and the **human arm as the visuo-tactile pipeline
 publishes it** -- this package does not draw the arm: `/skeleton_3d/keypoints`

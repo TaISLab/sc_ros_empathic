@@ -498,6 +498,10 @@ class SharedControlNode(object):
                                           queue_size=1),
             'factors_r': rospy.Publisher('~diag/factors_r', Float64MultiArray,
                                           queue_size=1),
+            # blend candidate v_hat_s, same [smoothness,directness,
+            # joint_safety,manipulability] layout as factors_h/r
+            'factors_s': rospy.Publisher('~diag/factors_s', Float64MultiArray,
+                                          queue_size=1),
             'v_h': rospy.Publisher('~diag/v_h', Vector3Stamped, queue_size=1),
             'v_r': rospy.Publisher('~diag/v_r', Vector3Stamped, queue_size=1),
             'v_s': rospy.Publisher('~diag/v_s', Vector3Stamped, queue_size=1),
@@ -840,7 +844,7 @@ class SharedControlNode(object):
 
     def _publish_diag(self, stamp, v_h, v_r, v_s, factors_h, factors_r,
                        s_near, lap, cross_track, human_fresh, l1_cur, l2_cur,
-                       v_hat_s=None):
+                       v_hat_s=None, factors_s=None):
         def vec3(pub_key, v):
             m = Vector3Stamped()
             m.header.stamp = stamp
@@ -858,6 +862,8 @@ class SharedControlNode(object):
             Float64MultiArray(data=_factors_to_array(factors_h)))
         self.diag['factors_r'].publish(
             Float64MultiArray(data=_factors_to_array(factors_r)))
+        self.diag['factors_s'].publish(
+            Float64MultiArray(data=_factors_to_array(factors_s or {})))
 
         # [s_near, completed laps, continuous progress (laps, monotone
         #  in the travel direction), cross-track error m]
@@ -1089,13 +1095,14 @@ class SharedControlNode(object):
                 eta_h, eta_r, eta_s = (info['eta_h'], info['eta_r'],
                                        info['eta_s'])
                 factors_h, factors_r = info['factors_h'], info['factors_r']
+                factors_s = info['factors_s']
                 v_hat_s = info['v_hat_s']   # blend before eta_s scales it
             else:
                 # Condition A: no assistance. Shape v_h only; the core
                 # blend / eta_s pass are bypassed by design.
                 v_s = self._shape_standalone(self.v_h)
                 eta_h, eta_r, eta_s = 1.0, 0.0, 1.0
-                factors_h, factors_r = {}, {}
+                factors_h, factors_r, factors_s = {}, {}, {}
                 self.core.v_prev = v_s  # keep smoothness reference coherent
 
             if self._trial_done or hold_for_human:
@@ -1118,7 +1125,8 @@ class SharedControlNode(object):
 
             self._publish_diag(stamp, self.v_h, v_r, v_s, factors_h,
                                 factors_r, s_near, lap, cross_track,
-                                human_fresh, l1_cur, l2_cur, v_hat_s)
+                                human_fresh, l1_cur, l2_cur, v_hat_s,
+                                factors_s)
 
             if self.csv_w is not None:
                 self._write_csv_row(stamp, s_near, lap, cross_track, v_r, v_s,
