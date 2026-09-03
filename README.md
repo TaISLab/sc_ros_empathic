@@ -142,20 +142,20 @@ all four at once, one `rqt_plot` window (degrees):
 rqt_plot /shared_control_node/diag/joint_deg/data[0]:data[1]:data[2]:data[3]
 ```
 
-To also see each joint's `[min, max]` range as a shaded band **in the
-same colour as its trace** (which `rqt_plot` cannot do), launch with
-`joint_plot:=true` -- it runs `plot_joint_angles.py`, a matplotlib
-window fed by `~diag/joint_deg` + the latched `~diag/joint_deg_limits`.
-Per joint, four traces in that joint's colour: **solid** = measured
-`q_i`; **dashed** / **dotted** / **dash-dot** = `q_i` extrapolated
-`dt_lookahead` ahead along the joint velocity the `v_h` / `v_r` /
-blend-`v_hat_s` candidate commands induce
-(`~diag/joint_deg_future_{h,r,s}`, before `eta_s` scales the output) --
-i.e. what `joint_safety`'s dynamic term scores for each candidate. A
-future trace heading into a band is what pulls that candidate's `eta`
-down. The right-hand axis carries the three efficiencies **`eta_h` /
-`eta_r` / `eta_s`** (`~eta`) with the same dashed / dotted / dash-dot
-key, in black. `show_future:=false` / `show_eta:=false` drop them.
+For a per-joint view, launch with `joint_plot:=true` -- it runs
+`plot_joint_angles.py`, a matplotlib window with **one subplot per
+joint** (plus one for the efficiencies), fed by `~diag/joint_deg` +
+the latched `~diag/joint_deg_limits`. Each joint subplot: **solid** =
+measured `q_i`; **dashed** / **dotted** / **dash-dot** = `q_i`
+extrapolated `dt_lookahead` ahead along the joint velocity the `v_h` /
+`v_r` / blend-`v_hat_s` candidate commands induce
+(`~diag/joint_deg_future_{h,r,s}`, the blend taken before `eta_s`
+scales the output) -- what `joint_safety`'s dynamic term scores for
+each candidate; the joint's `[min, max]` range is the shaded band. A
+future trace heading into the band is what pulls that candidate's
+`eta` down. The last subplot carries the three efficiencies **`eta_h`
+/ `eta_r` / `eta_s`** (`~eta`). `show_future:=false` /
+`show_eta:=false` drop the projections / the efficiency subplot.
 
 Plus the FR3 model, and the **human arm as the visuo-tactile pipeline
 publishes it** -- this package does not draw the arm: `/skeleton_3d/keypoints`

@@ -2,14 +2,13 @@
 """
 plot_joint_angles.py
 --------------------
-Live plot of the human arm's four joint angles q1..q4 (degrees) with
-each joint's [min, max] range drawn as a shaded band IN THE SAME COLOUR
-as the joint's trace -- the colour match rqt_plot cannot do.
+Live plot of the human arm's joint angles, one SUBPLOT per joint plus a
+final subplot for the efficiencies (shared time axis).
 
   q1  shoulder flex/ext      q3  shoulder int/ext rotation
-  q2  shoulder abd/add       q4  elbow flex/ext
+  q2  shoulder abd/add       q4  elbow flex/ext (0 = extended)
 
-Per joint, four traces in that joint's colour:
+Per joint subplot, in that joint's colour:
   solid    measured q_i (~diag/joint_deg)
   dashed   q_i extrapolated along the velocity the HUMAN command v_h
            induces          (~diag/joint_deg_future_h)
@@ -19,17 +18,17 @@ Per joint, four traces in that joint's colour:
            scales the output (~diag/joint_deg_future_s)
 Each future trace is q_h + qdot_k * dt_lookahead: qdot_k is what
 joint_safety's dynamic term scores for candidate k, over the
-controller's own lookahead horizon.
+controller's own lookahead horizon. The joint's [min, max] range is a
+shaded band in the same subplot.
 
-A second y-axis (right) carries the three shared-control efficiencies
-eta_h / eta_r / eta_s (~eta), same dashed / dotted / dash-dot key,
-in black.
+Efficiencies subplot: the three shared-control efficiencies
+eta_h / eta_r / eta_s (~eta).
 
 Params:
   ~window_s     rolling time window shown (s), default 30
   ~redraw_hz    figure redraw rate (Hz),      default 15
-  ~show_future  draw the 3 extrapolation sets, default true
-  ~show_eta     draw eta_h/eta_r/eta_s,        default true
+  ~show_future  draw the 3 extrapolation traces, default true
+  ~show_eta     draw the efficiencies subplot,   default true
 """
 
 import collections
@@ -40,11 +39,11 @@ from std_msgs.msg import Float64MultiArray
 
 import matplotlib.pyplot as plt
 
-# q1..q4 colours -- reused for every trace and the limit band of a joint.
+# q1..q4 colours -- one per joint subplot.
 JOINT_COLOURS = ('#1f77b4', '#d62728', '#2ca02c', '#9467bd')
 JOINT_LABELS = ('q1 shoulder flex/ext', 'q2 shoulder abd/add',
-                'q3 shoulder rot', 'q4 elbow')
-ETA_COLOUR = '#111111'
+                'q3 shoulder int/ext rot', 'q4 elbow (0=extended)')
+ETA_COLOURS = {'h': '#1b9e77', 'r': '#7570b3', 's': '#d95f02'}
 # candidate command -> line style (measured q_h is 'solid')
 STYLE = {'meas': '-', 'h': '--', 'r': ':', 's': '-.'}
 STYLE_LABEL = {'meas': 'measured', 'h': 'v_h projection',
@@ -105,53 +104,53 @@ class JointAnglePlot(object):
             rospy.Subscriber(eta_topic, Float64MultiArray, self._eta_cb,
                              queue_size=5)
 
-        self.fig, self.ax = plt.subplots(figsize=(10, 5.5))
-        self.ax.set_xlabel('t (s)')
-        self.ax.set_ylabel('joint angle (deg)')
-        self.ax.set_title('Human joint angles vs limits')
-        self.ax.grid(True, alpha=0.3)
+        nrows = 5 if self.show_eta else 4
+        self.fig, axs = plt.subplots(
+            nrows, 1, sharex=True, figsize=(9, 2.0 * nrows + 1),
+            constrained_layout=True)
+        self.jaxs = list(axs[:4])
+        self.eax = axs[4] if self.show_eta else None
+        self.fig.suptitle('Human joint angles vs limits')
 
-        self.meas_lines = [
-            self.ax.plot([], [], color=JOINT_COLOURS[i], lw=1.7,
-                         ls=STYLE['meas'])[0]
-            for i in range(4)
-        ]
-        self.fut_lines = {}
-        if self.show_future:
-            for k in ('h', 'r', 's'):
-                self.fut_lines[k] = [
-                    self.ax.plot([], [], color=JOINT_COLOURS[i], lw=1.2,
-                                 ls=STYLE[k], alpha=0.9)[0]
-                    for i in range(4)
-                ]
+        self.meas_lines = []
+        self.fut_lines = {k: [] for k in ('h', 'r', 's')}
+        for i, ax in enumerate(self.jaxs):
+            c = JOINT_COLOURS[i]
+            ax.set_ylabel('%s\n(deg)' % JOINT_LABELS[i], color=c, fontsize=8)
+            ax.tick_params(axis='y', labelcolor=c)
+            ax.grid(True, alpha=0.3)
+            self.meas_lines.append(
+                ax.plot([], [], color=c, lw=1.7, ls=STYLE['meas'])[0])
+            if self.show_future:
+                for k in ('h', 'r', 's'):
+                    self.fut_lines[k].append(
+                        ax.plot([], [], color=c, lw=1.2, ls=STYLE[k],
+                                alpha=0.9)[0])
+        self.jaxs[-1].set_xlabel('t (s)')
 
-        self.ax2 = None
-        self.eta_lines = []
         if self.show_eta:
-            self.ax2 = self.ax.twinx()
-            self.ax2.set_ylabel('eta_h / eta_r / eta_s')
-            self.ax2.set_ylim(-0.02, 1.05)
-            for j, k in enumerate(('h', 'r', 's')):
-                (ln,) = self.ax2.plot([], [], color=ETA_COLOUR, lw=2.0,
-                                      ls=STYLE[k])
-                self.eta_lines.append(ln)
+            self.eax.set_ylabel('efficiency', fontsize=8)
+            self.eax.set_ylim(-0.02, 1.05)
+            self.eax.grid(True, alpha=0.3)
+            self.eax.set_xlabel('t (s)')
+            self.jaxs[-1].set_xlabel('')
+            self.eta_lines = [
+                self.eax.plot([], [], color=ETA_COLOURS[k], lw=1.8,
+                              label='eta_' + k)[0]
+                for k in ('h', 'r', 's')
+            ]
+            self.eax.legend(loc='lower left', fontsize=8, ncol=3)
+        else:
+            self.eta_lines = []
+
+        # style key -- once, on the top joint subplot
+        keys = ['meas'] + (['h', 'r', 's'] if self.show_future else [])
+        self.jaxs[0].legend(
+            handles=[plt.Line2D([], [], color='#666', lw=1.5, ls=STYLE[k],
+                                label=STYLE_LABEL[k]) for k in keys],
+            loc='upper left', fontsize=7, ncol=len(keys))
 
         self._band_artists = []
-        self._build_legend()
-
-    # ---- legend -----------------------------------------------------
-    def _build_legend(self):
-        handles = [plt.Line2D([], [], color=JOINT_COLOURS[i], lw=2,
-                              label=JOINT_LABELS[i]) for i in range(4)]
-        keys = ['meas'] + (['h', 'r', 's'] if self.show_future else [])
-        for k in keys:
-            handles.append(plt.Line2D([], [], color='#666666', lw=1.5,
-                                      ls=STYLE[k], label=STYLE_LABEL[k]))
-        if self.show_eta:
-            for k in ('h', 'r', 's'):
-                handles.append(plt.Line2D([], [], color=ETA_COLOUR, lw=2,
-                                          ls=STYLE[k], label='eta_' + k))
-        self.ax.legend(handles=handles, loc='upper left', fontsize=7, ncol=3)
 
     # ---- callbacks ------------------------------------------------
     def _elapsed(self):
@@ -206,13 +205,13 @@ class JointAnglePlot(object):
         if not limits:
             return
         for i, (lo, hi) in enumerate(limits):
-            c = JOINT_COLOURS[i]
+            ax, c = self.jaxs[i], JOINT_COLOURS[i]
             self._band_artists.append(
-                self.ax.axhspan(lo, hi, color=c, alpha=0.07, zorder=0))
+                ax.axhspan(lo, hi, color=c, alpha=0.10, zorder=0))
             for y in (lo, hi):
                 self._band_artists.append(
-                    self.ax.axhline(y, color=c, ls='--', lw=1.0, alpha=0.6,
-                                    zorder=1))
+                    ax.axhline(y, color=c, ls='--', lw=1.0, alpha=0.6,
+                               zorder=1))
 
     @staticmethod
     def _set(line, t, v):
@@ -241,17 +240,17 @@ class JointAnglePlot(object):
             if last is not None:
                 for i in range(4):
                     self._set(self.meas_lines[i], meas[0], meas[1][i])
-                for k, lines in self.fut_lines.items():
-                    ft, fv = fut[k]
-                    for i in range(4):
-                        self._set(lines[i], ft, fv[i])
+                    for k in self.fut_lines:
+                        ft, fv = fut[k]
+                        self._set(self.fut_lines[k][i], ft, fv[i])
                 for j, ln in enumerate(self.eta_lines):
                     self._set(ln, eta[0], eta[1][j])
                 self._draw_bands(lims)
-                self.ax.set_xlim(max(0.0, last - self.window_s),
-                                 max(self.window_s, last))
-                self.ax.relim()
-                self.ax.autoscale_view(scalex=False, scaley=True)
+                self.jaxs[0].set_xlim(max(0.0, last - self.window_s),
+                                      max(self.window_s, last))
+                for ax in self.jaxs:
+                    ax.relim()
+                    ax.autoscale_view(scalex=False, scaley=True)
             try:
                 self.fig.canvas.draw_idle()
                 self.fig.canvas.flush_events()
