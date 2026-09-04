@@ -169,6 +169,23 @@ joint-limit-safety factor** for each candidate -- `js_h` / `js_r` /
 full weighted `eta`. `show_future:=false` / `show_joint_safety:=false`
 drop the projections / the safety subplot.
 
+**Offline (MATLAB).** `matlab/plot_joint_angles_offline.m` gives the
+same per-joint layout from a saved CSV, with a selectable window:
+
+```matlab
+plot_joint_angles_offline('P01_E_extended_m4_....csv')          % whole run
+plot_joint_angles_offline('....csv', [40 55])                   % 40-55 s
+plot_joint_angles_offline('....csv', 'lap', 3)                   % just lap 3
+plot_joint_angles_offline('....csv', [40 55], subjectLimitsDeg) % 4x2 deg
+```
+
+It reconstructs `q_i` in degrees from the logged `rho_i` and the joint
+limits (default = the study `DEFAULT_JOINT_LIMITS`; pass the volunteer's
+4x2 ranges if the trial used `subject:=`), draws the `[min,max]` band
+and the `tau` proximity lines, marks lap boundaries, greys stale
+(`human_fresh==0`) spans, and prints a per-joint summary
+(median `rho`, % of the window past a limit).
+
 Plus the FR3 model, and the **human arm as the visuo-tactile pipeline
 publishes it** -- this package does not draw the arm: `/skeleton_3d/keypoints`
 (`PointCloud`), `/skeleton_3d/connectors` (`Marker`), and the
