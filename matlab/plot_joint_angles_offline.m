@@ -6,15 +6,17 @@ function plot_joint_angles_offline(csvfile, window, limits_deg)
 %
 %   plot_joint_angles_offline(csvfile)
 %   plot_joint_angles_offline(csvfile, [t0 t1])           % seconds from start
-%   plot_joint_angles_offline(csvfile, [t0 t1], limits)   % 4x2 deg, per joint
-%   plot_joint_angles_offline(csvfile, 'lap', N)          % just lap N
+%   plot_joint_angles_offline(csvfile, N)                 % just lap N (scalar)
+%   plot_joint_angles_offline(csvfile, sel, limits)       % + 4x2 limits, deg
 %
 %   The CSV logs rho1..rho4 (signed position in [-1,1], 0 = mid-range,
 %   +-1 = a limit) and m1..m4, not the raw angles. q_i is reconstructed as
-%   qmid_i + rho_i*qhalf_i from LIMITS, default performance.DEFAULT_JOINT_LIMITS
-%   -- what a trial run WITHOUT a subject file uses:
-%       q1 [-60,180]  q2 [0,180]  q3 [-90,90]  q4 [0,145]   (deg)
-%   Pass the volunteer's ranges if the trial used subject:=SXX.
+%   qmid_i + rho_i*qhalf_i from LIMITS. If a "<csv>.params.json" sidecar
+%   (written by shared_control_node) sits next to the CSV, its
+%   human_model.joint_limits_rad are used automatically; otherwise the
+%   study DEFAULT_JOINT_LIMITS -- what a trial run WITHOUT a subject file
+%   uses: q1 [-60,180] q2 [0,180] q3 [-90,90] q4 [0,145] (deg). An
+%   explicit LIMITS argument overrides both.
 %
 %   Zoom/pan any subplot -- the time axes are linked. A one-line summary
 %   (duration, laps, median eta, time spent past a limit) is printed too.
@@ -23,29 +25,32 @@ function plot_joint_angles_offline(csvfile, window, limits_deg)
 
     DEFAULT_LIMITS = [-60 180; 0 180; -90 90; 0 145];   % deg
     if nargin < 2, window = []; end
-    if nargin < 3 || isempty(limits_deg), limits_deg = DEFAULT_LIMITS; end
     TAU = 0.3;                        % proximity_threshold (config default)
     JC = [ 31 119 180; 214 39 40; 44 160 44; 148 103 189] / 255;
     JN = {'q1 shoulder flex/ext','q2 shoulder abd/add', ...
           'q3 shoulder int/ext rot','q4 elbow (0=extended)'};
 
+    % joint limits: explicit 3rd arg > <csv>.params.json sidecar > defaults
+    if nargin >= 3 && ~isempty(limits_deg)
+        limits_src = 'argument';
+    else
+        [limits_deg, limits_src] = load_sidecar_limits(csvfile, DEFAULT_LIMITS);
+    end
+
     T = readtable(csvfile);
     t = T.t_rel - T.t_rel(1);        % seconds from the first logged row
 
-    % ---- row selection ----------------------------------------------
+    % ---- row selection --------------------------------------------
     lap_only = [];
-    if ischar(window) || isstring(window)
-        assert(strcmpi(window,'lap') && nargin >= 3, ...
-               'Use plot_joint_angles_offline(csv, ''lap'', N)');
-        lap_only  = limits_deg;                 % 3rd arg carries the lap #
-        limits_deg = DEFAULT_LIMITS;
-        sel = T.lap == lap_only;
-    elseif ~isempty(window)
-        sel = t >= window(1) & t <= window(2);
-    else
+    if isempty(window)
         sel = true(height(T),1);
+    elseif isscalar(window)                     % a lap number
+        lap_only = window;
+        sel = T.lap == lap_only;
+    else                                        % [t0 t1] seconds
+        sel = t >= window(1) & t <= window(2);
     end
-    assert(any(sel), 'No rows in the requested window.');
+    assert(any(sel), 'No rows in the requested window / lap.');
 
     % ---- reconstruct q_i (deg) ------------------------------------
     rho   = [T.rho1 T.rho2 T.rho3 T.rho4];
@@ -113,6 +118,7 @@ function plot_joint_angles_offline(csvfile, window, limits_deg)
     snf = T.s_near(sel);
     wraps = nnz(snf(1:end-1) > 0.8 & snf(2:end) < 0.2);
     fprintf('\n%s\n', csvfile);
+    fprintf('  joint limits: %s\n', limits_src);
     fprintf('  window %.1f-%.1f s  (%.1f s, ~%d laps)\n', ...
             xr(1), xr(2), xr(2)-xr(1), wraps);
     fprintf('  eta_h med %.3f   eta_s med %.3f\n', ...
@@ -140,6 +146,29 @@ function shade_stale(ax, t, fresh)
                  'FaceAlpha',0.12, 'EdgeColor','none', 'HandleVisibility','off');
         end
     end
+end
+
+function [lim_deg, src] = load_sidecar_limits(csvfile, default_deg)
+% Use human_model.joint_limits_rad from "<csv>.params.json" if present.
+    lim_deg = default_deg;  src = 'DEFAULT_JOINT_LIMITS';
+    [d, n] = fileparts(csvfile);
+    side = fullfile(d, [n '.params.json']);
+    if exist(side, 'file') ~= 2, return; end
+    try
+        s = jsondecode(fileread(side));
+        jl = s.human_model.joint_limits_rad;      % 4x2 rad (or flat 8)
+        if isvector(jl), jl = reshape(jl(:), 2, 4).'; end
+        assert(isequal(size(jl), [4 2]), 'joint_limits_rad not 4x2');
+        lim_deg = jl * 180/pi;
+        src = sprintf('%s sidecar (%s)', [n '.params.json'], ...
+                      getfield_default(s.human_model, 'joint_limits_source', '?'));
+    catch ME
+        warning('sidecar %s unreadable (%s); using defaults', side, ME.message);
+    end
+end
+
+function v = getfield_default(s, f, d)
+    if isfield(s, f), v = s.(f); else, v = d; end
 end
 
 function draw_lap_lines(ax, edges, nums, label)

@@ -180,11 +180,17 @@ plot_joint_angles_offline('....csv', [40 55], subjectLimitsDeg) % 4x2 deg
 ```
 
 It reconstructs `q_i` in degrees from the logged `rho_i` and the joint
-limits (default = the study `DEFAULT_JOINT_LIMITS`; pass the volunteer's
-4x2 ranges if the trial used `subject:=`), draws the `[min,max]` band
-and the `tau` proximity lines, marks lap boundaries, greys stale
-(`human_fresh==0`) spans, and prints a per-joint summary
-(median `rho`, % of the window past a limit).
+limits, draws the `[min,max]` band and the `tau` proximity lines, marks
+lap boundaries, greys stale (`human_fresh==0`) spans, and prints a
+per-joint summary (median `rho`, % of the window past a limit).
+
+The CSV rows carry no config beyond `condition`, so the node writes a
+**`<csv>.params.json` sidecar** next to it (geometry, follower gains,
+factor weights / `Cs` / `proximity_threshold`, `planar_task`,
+resolved joint limits + `human_joint_offsets`/`gains`, static
+`l1,l2`, admittance, topics, git commit). The MATLAB viewer picks up
+the joint limits from that sidecar automatically; an explicit `limits`
+argument still wins.
 
 Plus the FR3 model, and the **human arm as the visuo-tactile pipeline
 publishes it** -- this package does not draw the arm: `/skeleton_3d/keypoints`
@@ -321,6 +327,14 @@ everything the Sec. V-D metrics and the traced-path plots need,
 directly loadable with pandas (plot against `t_rel`). Flushed ~1x/s and
 closed cleanly on Ctrl-C. Independent of `record:=true`; use either or
 both.
+
+The rows carry no configuration beyond `condition`, so a
+**`<csv>.params.json` sidecar** is written alongside at startup with
+the run's geometry, follower gains, factor weights / `Cs` /
+`proximity_threshold`, `planar_task`, the resolved joint limits (rad)
++ `human_joint_offsets` / `human_joint_gains`, static `l1,l2`,
+admittance params, the human topics, and the git commit -- so each CSV
+is self-contained for offline analysis.
 
 ## Recording trials (rosbag)
 

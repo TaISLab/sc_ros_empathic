@@ -72,6 +72,7 @@ do not assume it silently matches the paper's per-cycle timing figures.
 """
 
 import csv
+import json
 import os
 import time
 
@@ -627,6 +628,7 @@ class SharedControlNode(object):
                 os.makedirs(d)
             self.csv_fh = open(csv_path, 'w')
             self.csv_w = csv.writer(self.csv_fh)
+            self._csv_path = csv_path
             self._csv_t0 = None
             self._csv_rows = 0
             self.csv_w.writerow(
@@ -656,6 +658,10 @@ class SharedControlNode(object):
 
         self.rate_hz = rospy.get_param('~rate_hz', 200.0)
         self.dt = 1.0 / self.rate_hz
+
+        # Sidecar: the config the CSV rows were produced with (they carry
+        # none of it beyond `condition`).
+        self._dump_params_sidecar()
 
         if 'joint_safety' in self.cond_factors:
             has_ll = (self.l1_static is not None
@@ -997,6 +1003,88 @@ class SharedControlNode(object):
             except Exception:
                 pass
             self.csv_fh = None
+
+    @staticmethod
+    def _git_commit():
+        try:
+            import subprocess
+            here = os.path.dirname(os.path.abspath(__file__))
+            return subprocess.check_output(
+                ['git', '-C', here, 'rev-parse', '--short', 'HEAD'],
+                stderr=subprocess.DEVNULL).decode().strip()
+        except Exception:
+            return None
+
+    def _dump_params_sidecar(self):
+        """Write <csv>.params.json next to the CSV so each log is
+        self-contained: the geometry / gains / weights / joint model the
+        rho_i and eta_* were produced with (the CSV rows carry none of
+        this beyond `condition`)."""
+        path = getattr(self, '_csv_path', None)
+        if not path:
+            return
+        side = os.path.splitext(path)[0] + '.params.json'
+        p = lambda name, default=None: rospy.get_param('~' + name, default)
+
+        if self.human_joint_limits is not None:
+            jl = np.asarray(self.human_joint_limits, dtype=float).tolist()
+            jl_src = ('~human_joint_limits' if p('human_joint_limits') is not None
+                      else 'subject_file')
+        else:
+            jl = np.asarray(DEFAULT_JOINT_LIMITS, dtype=float).tolist()
+            jl_src = 'DEFAULT_JOINT_LIMITS'
+
+        params = {
+            'created': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'git_commit': self._git_commit(),
+            'condition': self.condition_id,
+            'subject_id': getattr(self.subject, 'subject_id', None),
+            'subject_file': p('subject_file', ''),
+            'trial_label': p('trial_label', ''),
+            'path': {
+                'center': p('path_center'),
+                'radius': p('path_radius'),
+                'normal': p('path_normal'),
+                'direction': p('path_direction', 'forward'),
+                'planar_task': bool(self.planar_task),
+            },
+            'follower': {k: p(k) for k in
+                         ('follower_mode', 'Ka', 'rho_min', 'lam',
+                          'cruise_speed')},
+            'output': {'v_max': float(self.v_max),
+                       'lpf_alpha': float(self.lpf_alpha),
+                       'rate_hz': float(self.rate_hz)},
+            'admittance': {'mass': self.M_h.tolist(),
+                           'damping': self.B_h.tolist(),
+                           'force_deadzone_N': float(self.deadzone_N),
+                           'force_lpf_alpha': float(self.alpha_f),
+                           'force_tare_s': p('force_tare_s')},
+            'factors': {k: p(k) for k in
+                        ('C1', 'C2', 'Cs', 'Cm', 'proximity_threshold',
+                         'dt_lookahead', 'w_smoothness', 'w_directness',
+                         'w_joint_safety', 'w_manipulability')},
+            'human_model': {
+                'joint_limits_rad': jl,
+                'joint_limits_source': jl_src,
+                'joint_offsets_rad': list(map(
+                    float, np.asarray(self.human_joint_offsets).tolist())),
+                'joint_gains': list(map(
+                    float, np.asarray(self.human_joint_gains).tolist())),
+                'l1_l2_static_m': [self.l1_static, self.l2_static],
+                'max_human_state_age': float(self.max_human_state_age),
+            },
+            'topics': {k: getattr(self, k, None) for k in
+                       ('human_joint_state_topic', 'human_link_lengths_topic',
+                        'human_arm_points_topic', 'franka_states_topic',
+                        'cmd_topic')},
+        }
+        try:
+            with open(side, 'w') as fh:
+                json.dump(params, fh, indent=2, sort_keys=True, default=str)
+            rospy.loginfo('shared_control_node: params sidecar -> %s', side)
+        except Exception as e:
+            rospy.logwarn('shared_control_node: could not write params '
+                          'sidecar %s: %s', side, e)
 
     # ------------------------------------------------------------
     # Control loop
