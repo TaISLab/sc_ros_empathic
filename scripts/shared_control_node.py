@@ -233,6 +233,22 @@ class SharedControlNode(object):
                           "'forward' or 'reverse'; using 'forward'.", pd)
         self.path_dir = -1 if pd == 'reverse' else 1
         self.path = CirclePath(center=center, radius=radius, normal=normal)
+
+        # Planar task: the human-intent velocity v_h is projected onto
+        # the plane orthogonal to path_normal, so out-of-plane force
+        # (pressing down, sensor drift) neither pushes the EE off the
+        # circle plane nor inflates the directness/smoothness angles
+        # (measured against an in-plane path tangent). v_r keeps its
+        # normal component ON PURPOSE -- that is the follower pulling
+        # the EE back onto the circle's plane. Default off (full 3D).
+        self.planar_task = bool(rospy.get_param('~planar_task', False))
+        _n = np.asarray(normal, dtype=float)
+        self._plane_n = _n / (np.linalg.norm(_n) or 1.0)
+        if self.planar_task:
+            rospy.loginfo('shared_control_node: planar_task -> v_h projected '
+                          'onto the plane _|_ path_normal %s',
+                          self._plane_n.round(3).tolist())
+
         self.follower = ReactivePathFollower(
             self.path, Ka=Ka, rho_min=rho_min, lam=lam,
             cruise_speed=cruise_speed, mode=follower_mode,
@@ -1000,6 +1016,9 @@ class SharedControlNode(object):
             # 1. Human-intent velocity from the admittance model.
             accel = (self.f_filtered - self.B_h * self.v_h) / self.M_h
             self.v_h = self.v_h + accel * self.dt
+            if self.planar_task:
+                self.v_h = self.v_h - np.dot(self.v_h, self._plane_n) \
+                    * self._plane_n
 
             # 2. Path progress (observable) + robot command.
             s_near, cross_track = self.follower.progress(self.x)

@@ -86,6 +86,11 @@
   <arg name="path_radius" default="0.05"/>
   <arg name="path_normal" default="[0.0, 0.0, 1.0]"/>
   <arg name="path_direction" default="forward"/>  <!-- forward | reverse -->
+  <!-- planar_task:=true projects v_h onto the plane _|_ path_normal:
+       out-of-plane force no longer drives the EE off the circle plane
+       or inflates the directness/smoothness angles. v_r still restores
+       the plane. Leave false for a genuinely 3D task. -->
+  <arg name="planar_task" default="false"/>
 
 
   <!-- Loop-tuning knobs, exposed so you can iterate without editing
@@ -188,6 +193,7 @@
     <param name="path_radius" value="$(arg path_radius)"/>
     <rosparam param="path_normal" subst_value="true">$(arg path_normal)</rosparam>
     <param name="path_direction" value="$(arg path_direction)"/>
+    <param name="planar_task" value="$(arg planar_task)"/>
     <param name="Ka" value="$(arg Ka)"/>
     <param name="rho_min" value="$(arg rho_min)"/>
     <param name="cruise_speed" value="$(arg cruise_speed)"/>

@@ -113,6 +113,16 @@ frontal/vertical circle facing the participant, set e.g.
 `path_normal:="[1, 0, 0]"` -- the follower and the metrics are
 plane-agnostic.
 
+`planar_task:=true` projects the human-intent velocity `v_h` onto the
+plane orthogonal to `path_normal`. Out-of-plane force (pressing on the
+handle, force-sensor drift, unmodelled EE weight) then neither drives
+the EE off the circle plane nor inflates the `directness` /
+`smoothness` angles, which are measured against an in-plane path
+tangent -- a symptom is `directness_h` sitting low (~0.3) while `v_h`
+carries a large `z` component. `v_r` keeps its plane-normal part on
+purpose (that is the follower restoring the plane). Leave it `false`
+for a genuinely 3D task.
+
 `path_direction:=forward` (default) | `reverse` picks which way round
 the circle is traced; the lap counter and `trial_laps` follow the
 chosen direction (laps completed the intended way count up).
@@ -447,6 +457,7 @@ Pass as `arg:=value`. Anything not listed lives in
 | `path_radius` | `0.05` | circle radius, m. |
 | `path_normal` | `[0.0, 0.0, 1.0]` | circle-plane normal; `[0,0,1]` = horizontal. |
 | `path_direction` | `forward` | `forward` \| `reverse` -- which way round it is traced. |
+| `planar_task` | `false` | `true` -> project `v_h` onto the plane `_|_ path_normal` (out-of-plane force ignored). |
 
 ### Path follower / loop tuning
 
