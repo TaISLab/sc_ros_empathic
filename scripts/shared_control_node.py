@@ -646,7 +646,7 @@ class SharedControlNode(object):
                  'eta_h', 'eta_r', 'eta_s',
                  'smoothness_h', 'directness_h', 'joint_safety_h', 'manip_h',
                  'rho1', 'rho2', 'rho3', 'rho4',
-                 'm1', 'm2', 'm3', 'm4', 'm_min', 'w_qr'])
+                 'm1', 'm2', 'm3', 'm4', 'm_min', 'w_qr', 'l1', 'l2'])
             rospy.loginfo('shared_control_node: CSV log -> %s', csv_path)
             rospy.on_shutdown(self._close_csv)
 
@@ -990,7 +990,10 @@ class SharedControlNode(object):
                fh.get('smoothness', float('nan')),
                fh.get('directness', float('nan')),
                fh.get('joint_safety', float('nan')),
-               fh.get('manipulability', float('nan'))] + m + [w]
+               fh.get('manipulability', float('nan'))] + m + [
+               w,
+               float(l1_cur) if l1_cur is not None else float('nan'),
+               float(l2_cur) if l2_cur is not None else float('nan')]
         # row[0]=t (epoch), row[1]=t_rel: need full precision, not %g.
         out = [row[0], row[1]] + [
             ('%.6g' % v if isinstance(v, float) else v) for v in row[2:]]

@@ -182,7 +182,11 @@ plot_joint_angles_offline('....csv', [40 55], subjectLimitsDeg) % 4x2 deg
 It reconstructs `q_i` in degrees from the logged `rho_i` and the joint
 limits, draws the `[min,max]` band and the `tau` proximity lines, marks
 lap boundaries, greys stale (`human_fresh==0`) spans, and prints a
-per-joint summary (median `rho`, % of the window past a limit). It also
+per-joint summary (median `rho`, % of the window past a limit). Per
+joint it also overlays the **`v_h` / `v_r` / `v_s` predictions**
+(dashed / dotted / dash-dot) -- `q_i + qdot_k·dt_lookahead` recomputed
+offline from the logged velocities + the arm model (the
+`~diag/joint_deg_future_*` topics are not in the CSV). It also
 opens a **second figure** (`matlab/plot_paths_offline.m`, callable on
 its own): the reference circle and the robot EE path in the circle
 plane, with `v_h` / `v_r` / `v_h+v_r` arrows every ~1 s and the
@@ -329,7 +333,8 @@ px..pz, vh_*, vr_*, vs_*, fx..fz`, `human_fresh` (0/1 -- fresh
 q_h + l1,l2 this cycle; `joint_safety_h` / `m*` are `NaN` when 0),
 `jac_fresh` (0/1), `eta_h, eta_r, eta_s, smoothness_h, directness_h,
 joint_safety_h, manip_h, rho1..rho4` (signed joint position in
-`[-1,1]`), `m1..m4, m_min, w_qr` --
+`[-1,1]`), `m1..m4, m_min, w_qr`, `l1, l2` (upper-arm / forearm length
+used this cycle, m) --
 everything the Sec. V-D metrics and the traced-path plots need,
 directly loadable with pandas (plot against `t_rel`). Flushed ~1x/s and
 closed cleanly on Ctrl-C. Independent of `record:=true`; use either or

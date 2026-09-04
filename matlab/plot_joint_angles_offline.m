@@ -18,6 +18,15 @@ function plot_joint_angles_offline(csvfile, window, limits_deg)
 %   uses: q1 [-60,180] q2 [0,180] q3 [-90,90] q4 [0,145] (deg). An
 %   explicit LIMITS argument overrides both.
 %
+%   Per joint, as in the live plot: SOLID = measured q_i;
+%   DASHED / DOTTED / DASH-DOT = q_i projected dt_lookahead ahead along
+%   the joint velocity the v_h / v_r / v_s command induces
+%   (q_i + qdot_k*dt). The ~diag/joint_deg_future_* topics are not in the
+%   CSV, so these are RECOMPUTED here from the logged vh/vr/vs, the
+%   reconstructed q, l1/l2 (CSV columns if present, else the sidecar or
+%   0.30/0.25 m) and the 4-DoF arm model -- close to, not identical to,
+%   what the controller published.
+%
 %   Zoom/pan any subplot -- the time axes are linked. A one-line summary
 %   (duration, laps, median eta, time spent past a limit) is printed too.
 %
@@ -65,6 +74,23 @@ function plot_joint_angles_offline(csvfile, window, limits_deg)
     lap = T.lap(sel);
     xr = [min(tf) max(tf)];
 
+    % ---- velocity-based predictions q_i + qdot_k*dt_lookahead --------
+    STY = {'--', ':', '-.'};  KEYNM = {'v_h pred','v_r pred','v_s pred'};
+    [l1v, l2v, dtl] = sidecar_extra(csvfile, T, sel);
+    Vk = {[T.vh_x(sel) T.vh_y(sel) T.vh_z(sel)], ...
+          [T.vr_x(sel) T.vr_y(sel) T.vr_z(sel)], ...
+          [T.vs_x(sel) T.vs_y(sel) T.vs_z(sel)]};
+    QF = deg2rad(qf);                        % Nx4 rad
+    qpred = {nan(size(qf)), nan(size(qf)), nan(size(qf))};
+    for nn = 1:size(QF,1)
+        if any(isnan(QF(nn,:))), continue; end
+        Jn = arm_jac(QF(nn,:).', l1v(nn), l2v(nn));
+        for kk = 1:3
+            qd = cart2qdot(Jn, Vk{kk}(nn,:));      % rad/s, 4x1
+            qpred{kk}(nn,:) = qf(nn,:) + rad2deg(qd).' * dtl;
+        end
+    end
+
     lapEdges = tf([true; diff(lap) ~= 0]);
     lapNums  = lap([true; diff(lap) ~= 0]);
 
@@ -85,6 +111,10 @@ function plot_joint_angles_offline(csvfile, window, limits_deg)
         plot(ax(i), xr, [hi hi], '--', 'Color',JC(i,:), 'LineWidth',1);
         plot(ax(i), xr, [1 1]*pth(1), ':', 'Color',[.85 .55 0], 'LineWidth',1);
         plot(ax(i), xr, [1 1]*pth(2), ':', 'Color',[.85 .55 0], 'LineWidth',1);
+        for kk = 1:3
+            plot(ax(i), tf, qpred{kk}(:,i), STY{kk}, 'Color',JC(i,:), ...
+                 'LineWidth',1.0);
+        end
         plot(ax(i), tf, qf(:,i), '-', 'Color',JC(i,:), 'LineWidth',1.4);
         qv = qf(~isnan(qf(:,i)), i); if isempty(qv), qv = [lo; hi]; end
         pad = 0.05*(hi-lo);
@@ -93,6 +123,15 @@ function plot_joint_angles_offline(csvfile, window, limits_deg)
         grid(ax(i),'on');
         draw_lap_lines(ax(i), lapEdges, lapNums, i==1);
     end
+
+    % style key on the top subplot
+    hk = [plot(ax(1), nan, nan, '-', 'Color',[.4 .4 .4], 'LineWidth',1.4)];
+    for kk = 1:3
+        hk(end+1) = plot(ax(1), nan, nan, STY{kk}, 'Color',[.4 .4 .4], ...
+                         'LineWidth',1.0); %#ok<AGROW>
+    end
+    legend(ax(1), hk, [{'measured'} KEYNM], 'Location','best', ...
+           'FontSize',7, 'Box','off', 'Orientation','horizontal');
 
     ax(5) = nexttile; hold(ax(5),'on');
     shade_stale(ax(5), tf, fresh);
@@ -186,4 +225,60 @@ function draw_lap_lines(ax, edges, nums, label)
                  'VerticalAlignment','top', 'FontSize',7, 'Color',[.4 .4 .4]);
         end
     end
+end
+
+% ---- 4-DoF human-arm kinematics (port of src/sc_ros_empathic/dh_utils.py)
+function [l1, l2, dtl] = sidecar_extra(csvfile, T, sel)
+% l1/l2 per row (CSV column > sidecar static > 0.30/0.25); dt_lookahead.
+    N = nnz(sel);
+    l1 = 0.30*ones(N,1);  l2 = 0.25*ones(N,1);  dtl = 0.2;
+    vn = T.Properties.VariableNames;
+    if ismember('l1', vn) && ismember('l2', vn)
+        a = T.l1(sel);  b = T.l2(sel);
+        l1(isfinite(a) & a>0) = a(isfinite(a) & a>0);
+        l2(isfinite(b) & b>0) = b(isfinite(b) & b>0);
+    end
+    [d, n] = fileparts(csvfile);
+    side = fullfile(d, [n '.params.json']);
+    if exist(side, 'file') == 2
+        try
+            s = jsondecode(fileread(side));
+            if isfield(s,'factors') && isfield(s.factors,'dt_lookahead') ...
+                    && ~isempty(s.factors.dt_lookahead)
+                dtl = double(s.factors.dt_lookahead);
+            end
+            ll = s.human_model.l1_l2_static_m;
+            if ~ismember('l1', vn) && iscell(ll) == 0 && numel(ll) == 2 ...
+                    && all(isfinite(ll)) && all(ll > 0)
+                l1(:) = ll(1);  l2(:) = ll(2);
+            end
+        catch
+        end
+    end
+end
+
+function T = dhT(a, al, d, th)
+    ct=cos(th); st=sin(th); ca=cos(al); sa=sin(al);
+    T = [ct, -st*ca,  st*sa, a*ct;
+         st,  ct*ca, -ct*sa, a*st;
+          0,     sa,     ca,   d;
+          0,      0,      0,   1];
+end
+
+function p = wrist_pos(q, l1, l2)                 % q = [q1..q4] rad, col
+    T = dhT(0, pi/2, 0, q(1)) * dhT(0, pi/2, 0, q(2)) * ...
+        dhT(0, -pi/2, l1, q(3)) * dhT(l2, 0, 0, pi/2 - q(4));
+    p = T(1:3,4);
+end
+
+function J = arm_jac(q, l1, l2)                   % numerical 3x4, eps 1e-6
+    e = 1e-6;  p0 = wrist_pos(q, l1, l2);  J = zeros(3,4);
+    for i = 1:4
+        dq = zeros(4,1); dq(i) = e;
+        J(:,i) = (wrist_pos(q+dq, l1, l2) - p0) / e;
+    end
+end
+
+function qd = cart2qdot(J, v)                     % damped LS, damping 1e-3
+    qd = J.' * ((J*J.' + 1e-6*eye(3)) \ v(:));
 end
