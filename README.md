@@ -315,7 +315,10 @@ moves, the traced path is not actually sweeping the full circle (check
 `~/sc_ros_empathic_logs/<label>_<YYYY-MM-DD_HH-MM-SS>.csv` (e.g.
 `S01_E_extended_m4_2026-08-28_12-31-40.csv`). `<label>` defaults to
 `<subject>_<condition>` when you pass `subject:=`, else just
-`<condition>`; `trial_label:=` overrides it. The rosbag
+`<condition>`; `trial_label:=` overrides it. **When a subject file is
+used, its basename is enforced as the CSV/sidecar prefix** even if
+`trial_label:=` / `csv_path:=` would drop it, so every trial for a
+volunteer groups under `S01_...`. The rosbag
 (`record:=true`) shares the `<label>` prefix in
 `~/sc_ros_empathic_bags/` (its timestamp is rosbag's own all-dashes
 format). Override the CSV dir with `csv_dir:=`, or give an exact file

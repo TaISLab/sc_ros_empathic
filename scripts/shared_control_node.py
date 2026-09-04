@@ -604,23 +604,29 @@ class SharedControlNode(object):
         # analysis-ready file that does not need the rosbag. ~csv_path
         # gives an explicit file; else ~csv_dir auto-names
         # <label>_<YYYY-MM-DD_HH-MM-SS>.csv, where <label> = ~trial_label
-        # if set, else <subject>_<condition> (subject id from the loaded
-        # YAML) or just <condition>. Empty ~csv_path and ~csv_dir -> no
-        # CSV. (The rosbag shares the <label> prefix; its timestamp uses
-        # rosbag's own all-dashes format.)
+        # if set, else just <condition>. Empty ~csv_path and ~csv_dir ->
+        # no CSV. (The rosbag shares the <label> prefix; its timestamp
+        # uses rosbag's own all-dashes format.)
+        #
+        # When a subject file is used its BASENAME is prepended to the
+        # CSV name if not already there -- so every trial for a volunteer
+        # groups under that prefix (e.g. S01_E_extended_m4_<datetime>.csv)
+        # regardless of ~trial_label / ~csv_path. The sidecar inherits it.
         self.csv_fh = None
         self.csv_w = None
         csv_path = rospy.get_param('~csv_path', '')
         csv_dir = rospy.get_param('~csv_dir', '')
         if not csv_path and csv_dir:
-            label = rospy.get_param('~trial_label', '')
-            if not label:
-                sid = (self.subject.subject_id + '_'
-                       if self.subject is not None else '')
-                label = sid + self.condition_id
+            label = rospy.get_param('~trial_label', '') or self.condition_id
             csv_path = os.path.join(
                 os.path.expanduser(csv_dir),
                 '%s_%s.csv' % (label, time.strftime('%Y-%m-%d_%H-%M-%S')))
+        subj_stem = os.path.splitext(os.path.basename(
+            rospy.get_param('~subject_file', '')))[0]
+        if csv_path and subj_stem:
+            _d, _base = os.path.split(csv_path)
+            if not _base.lower().startswith(subj_stem.lower() + '_'):
+                csv_path = os.path.join(_d, '%s_%s' % (subj_stem, _base))
         if csv_path:
             csv_path = os.path.expanduser(csv_path)
             d = os.path.dirname(csv_path)
