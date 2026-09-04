@@ -182,7 +182,11 @@ plot_joint_angles_offline('....csv', [40 55], subjectLimitsDeg) % 4x2 deg
 It reconstructs `q_i` in degrees from the logged `rho_i` and the joint
 limits, draws the `[min,max]` band and the `tau` proximity lines, marks
 lap boundaries, greys stale (`human_fresh==0`) spans, and prints a
-per-joint summary (median `rho`, % of the window past a limit).
+per-joint summary (median `rho`, % of the window past a limit). It also
+opens a **second figure** (`matlab/plot_paths_offline.m`, callable on
+its own): the reference circle and the robot EE path in the circle
+plane, with `v_h` / `v_r` / `v_h+v_r` arrows every ~1 s and the
+eta-weighted arrows (`eta_h v_h`, `eta_r v_r`, `v_s`) overlaid.
 
 The CSV rows carry no config beyond `condition`, so the node writes a
 **`<csv>.params.json` sidecar** next to it (geometry, follower gains,

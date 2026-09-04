@@ -130,6 +130,13 @@ function plot_joint_angles_offline(csvfile, window, limits_deg)
         fprintf('  q%d: rho med %+.2f   past a limit %.0f%%   inside tau %.0f%%\n', ...
                 i, median(ri), 100*mean(abs(ri) > 1), 100*mean(abs(ri) > 1-TAU));
     end
+
+    % ---- companion figure: traced paths + velocity arrows ---------
+    try
+        plot_paths_offline(csvfile, window);
+    catch ME
+        warning('plot_paths_offline failed: %s', ME.message);
+    end
 end
 
 % -------------------------------------------------------------------
