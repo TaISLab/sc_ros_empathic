@@ -1,4 +1,4 @@
-function plot_joint_angles_offline(csvfile, window, limits_deg)
+function plot_joint_angles_offline(csvfile, window, limits_deg, pred_dt)
 %PLOT_JOINT_ANGLES_OFFLINE  Offline view of an sc_ros_empathic trial CSV,
 %   mirroring the live plot_joint_angles.py: one subplot per human joint
 %   (q1..q4 in degrees) with its [min,max] band and the proximity-threshold
@@ -8,6 +8,7 @@ function plot_joint_angles_offline(csvfile, window, limits_deg)
 %   plot_joint_angles_offline(csvfile, [t0 t1])           % seconds from start
 %   plot_joint_angles_offline(csvfile, N)                 % just lap N (scalar)
 %   plot_joint_angles_offline(csvfile, sel, limits)       % + 4x2 limits, deg
+%   plot_joint_angles_offline(csvfile, sel, limits, predS) % prediction horizon
 %
 %   The CSV logs rho1..rho4 (signed position in [-1,1], 0 = mid-range,
 %   +-1 = a limit) and m1..m4, not the raw angles. q_i is reconstructed as
@@ -19,13 +20,18 @@ function plot_joint_angles_offline(csvfile, window, limits_deg)
 %   explicit LIMITS argument overrides both.
 %
 %   Per joint, as in the live plot: SOLID = measured q_i;
-%   DASHED / DOTTED / DASH-DOT = q_i projected dt_lookahead ahead along
+%   DASHED / DOTTED / DASH-DOT = q_i projected PRED_DT seconds ahead along
 %   the joint velocity the v_h / v_r / v_s command induces
-%   (q_i + qdot_k*dt). The ~diag/joint_deg_future_* topics are not in the
-%   CSV, so these are RECOMPUTED here from the logged vh/vr/vs, the
+%   (q_i + qdot_k*PRED_DT). The ~diag/joint_deg_future_* topics are not in
+%   the CSV, so these are RECOMPUTED here from the logged vh/vr/vs, the
 %   reconstructed q, l1/l2 (CSV columns if present, else the sidecar or
 %   0.30/0.25 m) and the 4-DoF arm model -- close to, not identical to,
 %   what the controller published.
+%
+%   PRED_DT defaults to the run's dt_lookahead (~0.2 s), which is barely
+%   visible on clean data. Pass e.g. 0.5-1.0 s to make the divergence
+%   legible -- it is a constant-qdot linear extrapolation, so only
+%   meaningful for short horizons.
 %
 %   Zoom/pan any subplot -- the time axes are linked. A one-line summary
 %   (duration, laps, median eta, time spent past a limit) is printed too.
@@ -74,9 +80,11 @@ function plot_joint_angles_offline(csvfile, window, limits_deg)
     lap = T.lap(sel);
     xr = [min(tf) max(tf)];
 
-    % ---- velocity-based predictions q_i + qdot_k*dt_lookahead --------
-    STY = {'--', ':', '-.'};  KEYNM = {'v_h pred','v_r pred','v_s pred'};
+    % ---- velocity-based predictions q_i + qdot_k*PRED_DT -----------
+    STY = {'--', ':', '-.'};
     [l1v, l2v, dtl] = sidecar_extra(csvfile, T, sel);
+    if nargin >= 4 && ~isempty(pred_dt), dtl = pred_dt; end
+    KEYNM = {sprintf('v_h pred (%.2gs)',dtl), 'v_r pred', 'v_s pred'};
     Vk = {[T.vh_x(sel) T.vh_y(sel) T.vh_z(sel)], ...
           [T.vr_x(sel) T.vr_y(sel) T.vr_z(sel)], ...
           [T.vs_x(sel) T.vs_y(sel) T.vs_z(sel)]};
@@ -156,8 +164,10 @@ function plot_joint_angles_offline(csvfile, window, limits_deg)
     % ---- console summary --------------------------------------
     snf = T.s_near(sel);
     wraps = nnz(snf(1:end-1) > 0.8 & snf(2:end) < 0.2);
+    if nargin >= 4 && ~isempty(pred_dt), dtl_src = 'override'; else, dtl_src = 'dt_lookahead'; end
     fprintf('\n%s\n', csvfile);
     fprintf('  joint limits: %s\n', limits_src);
+    fprintf('  prediction horizon: %.3g s (%s)\n', dtl, dtl_src);
     fprintf('  window %.1f-%.1f s  (%.1f s, ~%d laps)\n', ...
             xr(1), xr(2), xr(2)-xr(1), wraps);
     fprintf('  eta_h med %.3f   eta_s med %.3f\n', ...
