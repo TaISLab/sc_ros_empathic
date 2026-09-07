@@ -2,7 +2,8 @@ function plot_joint_angles_offline(csvfile, window, limits_deg, pred_dt)
 %PLOT_JOINT_ANGLES_OFFLINE  Offline view of an sc_ros_empathic trial CSV,
 %   mirroring the live plot_joint_angles.py: one subplot per human joint
 %   (q1..q4 in degrees) with its [min,max] band and the proximity-threshold
-%   lines, plus a joint_safety / eta subplot. Shared, zoomable time axis.
+%   lines, plus a final subplot: eta_h / eta_r / eta_s (solid, colour =
+%   candidate) and joint_safety_h (dashed). Shared, zoomable time axis.
 %
 %   plot_joint_angles_offline(csvfile)
 %   plot_joint_angles_offline(csvfile, [t0 t1])           % seconds from start
@@ -75,7 +76,7 @@ function plot_joint_angles_offline(csvfile, window, limits_deg, pred_dt)
 
     tf = t(sel);  qf = q(sel,:);  rf = rho(sel,:);
     js = T.joint_safety_h(sel);
-    eh = T.eta_h(sel);  es = T.eta_s(sel);
+    eh = T.eta_h(sel);  er = T.eta_r(sel);  es = T.eta_s(sel);
     fresh = T.human_fresh(sel) == 1;
     lap = T.lap(sel);
     xr = [min(tf) max(tf)];
@@ -142,13 +143,15 @@ function plot_joint_angles_offline(csvfile, window, limits_deg, pred_dt)
            'FontSize',7, 'Box','off', 'Orientation','horizontal');
 
     ax(5) = nexttile; hold(ax(5),'on');
+    EC = [0.11 0.62 0.47; 0.46 0.44 0.70; 0.85 0.37 0.01];  % h / r / s
     shade_stale(ax(5), tf, fresh);
-    plot(ax(5), tf, js, '-',  'Color',[.85 .10 .10], 'LineWidth',1.6);
-    plot(ax(5), tf, eh, '--', 'Color',[.10 .10 .10], 'LineWidth',1.0);
-    plot(ax(5), tf, es, '-.', 'Color',[.45 .45 .45], 'LineWidth',1.0);
+    plot(ax(5), tf, eh, '-', 'Color',EC(1,:), 'LineWidth',1.9);
+    plot(ax(5), tf, er, '-', 'Color',EC(2,:), 'LineWidth',1.9);
+    plot(ax(5), tf, es, '-', 'Color',EC(3,:), 'LineWidth',1.9);
+    plot(ax(5), tf, js, '--', 'Color',EC(1,:), 'LineWidth',1.2);
     ylim(ax(5), [-0.02 1.05]); grid(ax(5),'on');
-    ylabel(ax(5), 'joint\_safety_h / eta');
-    legend(ax(5), {'joint\_safety_h','eta_h','eta_s'}, ...
+    ylabel(ax(5), 'efficiency (0..1)');
+    legend(ax(5), {'eta_h','eta_r','eta_s','js_h'}, ...
            'Location','southoutside','Orientation','horizontal','Box','off');
     draw_lap_lines(ax(5), lapEdges, lapNums, false);
     xlabel(ax(5), 't (s)');
@@ -172,8 +175,8 @@ function plot_joint_angles_offline(csvfile, window, limits_deg, pred_dt)
     fprintf('  prediction horizon: %.3g s (%s)\n', dtl, dtl_src);
     fprintf('  window %.1f-%.1f s  (%.1f s, ~%d laps)\n', ...
             xr(1), xr(2), xr(2)-xr(1), wraps);
-    fprintf('  eta_h med %.3f   eta_s med %.3f\n', ...
-            median(eh,'omitnan'), median(es,'omitnan'));
+    fprintf('  eta med  h %.3f   r %.3f   s %.3f\n', ...
+            median(eh,'omitnan'), median(er,'omitnan'), median(es,'omitnan'));
     fprintf('  joint_safety_h med %.3f   < 0.05 for %.0f%% of the window\n', ...
             median(js,'omitnan'), 100*mean(js(~isnan(js)) < 0.05));
     for i = 1:4

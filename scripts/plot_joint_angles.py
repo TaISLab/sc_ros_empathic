@@ -23,9 +23,10 @@ shaded band (dashed edges); the amber dotted lines are the safety
 margins at rho = +-(1 - proximity_threshold) -- inside them
 joint_safety starts to penalise.
 
-Efficiency subplot: ONLY the joint-limit-safety factor (factors_*[2],
-"joint_safety", in (0, 1]) for each candidate -- js_h / js_r / js_s
-from ~diag/factors_{h,r,s} -- not the full weighted eta_h/eta_r/eta_s.
+Efficiency subplot, per candidate h / r / s (colour = candidate):
+solid  eta_h / eta_r / eta_s (~eta) -- the full weighted efficiency;
+dashed js_h / js_r / js_s (factors_{h,r,s}[2]) -- only its
+joint-limit-safety component.
 
 Params:
   ~window_s           rolling time window shown (s), default 30
@@ -94,6 +95,7 @@ class JointAnglePlot(object):
         }
         lim_topic = rospy.get_param('~joint_deg_limits_topic',
                                     base + '/diag/joint_deg_limits')
+        eta_topic = rospy.get_param('~eta_topic', base + '/eta')
 
         # ROS delivers each callback on its own thread; the draw loop
         # runs on the main thread. All deque access is under this lock
@@ -105,6 +107,7 @@ class JointAnglePlot(object):
         self.meas = _MT(4)
         self.fut = {k: _MT(4) for k in ('h', 'r', 's')}
         self.js = {k: _MT(1) for k in ('h', 'r', 's')}
+        self.eta = _MT(3)                        # eta_h / eta_r / eta_s
 
         rospy.Subscriber(deg_topic, Float64MultiArray, self._deg_cb,
                          queue_size=5)
@@ -120,6 +123,8 @@ class JointAnglePlot(object):
                 rospy.Subscriber(topic, Float64MultiArray,
                                  lambda m, kk=k: self._js_cb(kk, m),
                                  queue_size=5)
+            rospy.Subscriber(eta_topic, Float64MultiArray, self._eta_cb,
+                             queue_size=5)
 
         nrows = 5 if self.show_js else 4
         self.fig, axs = plt.subplots(
@@ -146,17 +151,21 @@ class JointAnglePlot(object):
         self.jaxs[-1].set_xlabel('t (s)')
 
         self.js_lines = {}
+        self.eta_lines = {}
         if self.show_js:
-            self.jsax.set_ylabel('joint_safety\n(0..1)', fontsize=8)
+            self.jsax.set_ylabel('joint_safety / eta\n(0..1)', fontsize=8)
             self.jsax.set_ylim(-0.02, 1.05)
             self.jsax.grid(True, alpha=0.3)
             self.jsax.set_xlabel('t (s)')
             self.jaxs[-1].set_xlabel('')
             for k in ('h', 'r', 's'):
-                (ln,) = self.jsax.plot([], [], color=JS_COLOURS[k], lw=1.8,
-                                       ls=STYLE[k], label='js_' + k)
-                self.js_lines[k] = ln
-            self.jsax.legend(loc='lower left', fontsize=8, ncol=3)
+                (e,) = self.jsax.plot([], [], color=JS_COLOURS[k], lw=2.0,
+                                      ls='-', label='eta_' + k)
+                (j,) = self.jsax.plot([], [], color=JS_COLOURS[k], lw=1.3,
+                                      ls='--', alpha=0.9, label='js_' + k)
+                self.eta_lines[k] = e
+                self.js_lines[k] = j
+            self.jsax.legend(loc='lower left', fontsize=7, ncol=3)
 
         # style key -- once, on the top joint subplot
         keys = ['meas'] + (['h', 'r', 's'] if self.show_future else [])
@@ -204,6 +213,12 @@ class JointAnglePlot(object):
         with self._lock:
             self._push(self.js[key], [float(msg.data[FACTOR_JOINT_SAFETY_IDX])])
 
+    def _eta_cb(self, msg):
+        if len(msg.data) < 3:
+            return
+        with self._lock:
+            self._push(self.eta, [float(msg.data[i]) for i in range(3)])
+
     def _lim_cb(self, msg):
         if len(msg.data) >= 8:
             lims = [(float(msg.data[2 * i]), float(msg.data[2 * i + 1]))
@@ -247,17 +262,18 @@ class JointAnglePlot(object):
             fut = {k: cp(self.fut[k]) for k in self.fut} if self.show_future \
                 else {}
             js = {k: cp(self.js[k]) for k in self.js} if self.show_js else {}
+            eta = cp(self.eta) if self.show_js else ([], [])
             lims = list(self.limits) if self.limits else None
-        return meas, fut, js, lims
+        return meas, fut, js, eta, lims
 
     def spin(self):
         plt.ion()
         plt.show()
         rate = rospy.Rate(self.redraw_hz)
         while not rospy.is_shutdown():
-            meas, fut, js, lims = self._snapshot()
+            meas, fut, js, eta, lims = self._snapshot()
             all_t = ([meas[0]] + [fut[k][0] for k in fut]
-                     + [js[k][0] for k in js])
+                     + [js[k][0] for k in js] + [eta[0]])
             last = max((s[-1] for s in all_t if s), default=None)
             if last is not None:
                 for i in range(4):
@@ -268,6 +284,9 @@ class JointAnglePlot(object):
                 for k, ln in self.js_lines.items():
                     jt, jv = js[k]
                     self._set(ln, jt, jv[0])
+                for j, k in enumerate(('h', 'r', 's')):
+                    if k in self.eta_lines:
+                        self._set(self.eta_lines[k], eta[0], eta[1][j])
                 self._draw_bands(lims)
                 self.jaxs[0].set_xlim(max(0.0, last - self.window_s),
                                       max(self.window_s, last))
