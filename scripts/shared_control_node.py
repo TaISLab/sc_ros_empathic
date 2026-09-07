@@ -743,6 +743,7 @@ class SharedControlNode(object):
         pos = msg.position
         idx = {n: i for i, n in enumerate(msg.name)} if msg.name else {}
         l1 = l2 = None
+        from_pipeline = True   # visuo-tactile pipeline layout (by name / 7-entry)
         if all(n in idx and idx[n] < len(pos) for n in self._Q_NAMES):
             q = np.array([pos[idx[n]] for n in self._Q_NAMES])
             if (self._L1_NAME in idx and self._L2_NAME in idx
@@ -754,6 +755,7 @@ class SharedControlNode(object):
             l1, l2 = float(pos[2]), float(pos[5])            # upperarm, forearm
         elif len(pos) >= 4:
             q = np.array(pos[0:4])
+            from_pipeline = False
         else:
             rospy.logwarn_throttle(
                 5.0, 'shared_control_node: %s published %d positions / names '
@@ -761,7 +763,20 @@ class SharedControlNode(object):
                 self.human_joint_state_topic, len(pos), list(msg.name))
             return
 
-        # pipeline convention -> DH model: q_model = gain*(q_pipeline - offset)
+        # q4 convention. The visuo-tactile pipeline reports right_arm_q4 as
+        # the elbow INTERIOR angle (pi rad = arm fully extended, pi/2 = right
+        # angle, decreasing towards ~0.6 rad at full flexion). Everything
+        # downstream in this package -- performance.DEFAULT_JOINT_LIMITS q4
+        # = [0, 2.53], the DH model's theta_4 = pi/2 - q4, joint_rho and the
+        # plots -- uses q4 = elbow FLEXION from the extended arm (0 = straight,
+        # ~2.53 rad fully flexed). Convert here, once, so the control law,
+        # the arm Jacobian and the visualisation are all consistent. Without
+        # this, a straightening elbow drives rho4 towards +1 (a "limit") and
+        # joint_safety drops as the arm LEAVES its flexed range.
+        if from_pipeline:
+            q[3] = np.pi - q[3]
+
+        # residual per-rig / per-subject fixup: q_model = gain*(q - offset)
         q = self.human_joint_gains * (q - self.human_joint_offsets)
         now = rospy.Time.now()
         if self.q_h is None:
@@ -1075,6 +1090,8 @@ class SharedControlNode(object):
             'human_model': {
                 'joint_limits_rad': jl,
                 'joint_limits_source': jl_src,
+                'q4_input': 'pi - right_arm_q4 (pipeline sends elbow '
+                            'interior angle; converted to flexion, 0=extended)',
                 'joint_offsets_rad': list(map(
                     float, np.asarray(self.human_joint_offsets).tolist())),
                 'joint_gains': list(map(

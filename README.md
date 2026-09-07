@@ -233,12 +233,17 @@ When a joint's margin drops toward 0, `factors_h/data[2]`
 (`joint_safety`) must drop toward 0 too (it is `exp(-Cs * penalty)`).
 `~diag/joint_limits` is `[q1min,q1max,...,q4min,q4max]` (latched).
 
-**Angle convention.** `joint_limits` (and the DH arm model) assume
-`q_i = 0` at the goniometric neutral, plus the model's own sign/scale
-(e.g. `q4 = 0` arm extended, positive as the elbow flexes). If the
-visuo-tactile pipeline differs, `joint_safety` is scored against the
-wrong limits (symptom: a joint pinned near `rho = +-1` all trial,
-`joint_safety` stuck near 0). Fix with the affine calibration in
+**Angle convention.** `joint_limits` (and the DH arm model) use
+`q4 = 0` at the extended arm, positive as the elbow flexes (to
+~2.53 rad), and `q_i = 0` at the goniometric neutral for the shoulder
+joints. The visuo-tactile pipeline reports the elbow as an **interior
+angle** (`pi` rad extended, decreasing with flexion);
+`shared_control_node` converts it (`q4 <- pi - right_arm_q4`) at the
+one entry point, so the control law, the arm Jacobian and every plot
+agree. If a shoulder joint's zero/sign still differs, `joint_safety`
+is scored against the wrong limits (symptom: a joint pinned near
+`rho = +-1` all trial, `joint_safety` stuck near 0, or efficiency
+*rising* as a joint nears a limit). Fix with the affine calibration in
 `config/shared_control.yaml`:
 
 ```

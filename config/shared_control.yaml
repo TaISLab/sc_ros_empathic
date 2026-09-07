@@ -103,12 +103,12 @@ proximity_threshold: 0.3
 # the visuo-tactile pipeline, not the volunteer. Affects the limits AND
 # the arm Jacobian. Calibrate from two known postures a,b (model angles
 # qa,qb): gain=(qb-qa)/(q_pipe_b-q_pipe_a); offset=q_pipe_a-qa/gain.
-# Defaults leave q untouched. Examples:
-#   pipeline reads q3 ~ pi/2 at the model's neutral:
+# Defaults leave q untouched. This is only for RESIDUAL fixups -- the
+# known pipeline conventions are already handled in shared_control_node
+# (q4 <- pi - right_arm_q4: the pipeline sends the elbow interior angle).
+# Example, a shoulder joint off by pi/2 (pipeline reads q3 ~ pi/2 at the
+# model's neutral):
 #     human_joint_offsets: [0.0, 0.0, 1.5708, 0.0]
-#   q4: extended -> 0, fully flexed -> ~30 deg (read q_pipe at both):
-#     human_joint_offsets: [0.0, 0.0, 0.0, <q4_pipe_extended_rad>]
-#     human_joint_gains:   [1.0, 1.0, 1.0, <0.524/(q4_pipe_flexed - q4_pipe_extended)>]
 
 # --- Human-arm segment lengths ----------------------------------
 # The visuo-tactile pipeline is expected to publish time-varying

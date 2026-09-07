@@ -14,11 +14,12 @@ Joint (i) | a_i | alpha_i |  d_i | theta_i
 
 q4 is the ELBOW FLEXION angle: q4 = 0 is the fully extended arm
 (forearm colinear with the upper arm), q4 > 0 flexes it (q4 ~ 145 deg
-fully flexed). The pi/2 - q4 in theta_4 is what makes q4 = 0 the
-straight arm -- joint 3's -pi/2 twist otherwise puts the forearm
-perpendicular to the upper arm at theta_4 = 0. This matches the sign
-and zero that DEFAULT_JOINT_LIMITS q4 = [0, 2.53] assumes and that the
-visuo-tactile pipeline reports.
+fully flexed), matching DEFAULT_JOINT_LIMITS q4 = [0, 2.53]. The
+pi/2 - q4 in theta_4 is what makes q4 = 0 the straight arm -- joint 3's
+-pi/2 twist otherwise puts the forearm perpendicular to the upper arm
+at theta_4 = 0. NOTE: the visuo-tactile pipeline reports the elbow
+INTERIOR angle instead (pi = extended); shared_control_node converts it
+(q4 <- pi - right_arm_q4) before anything here sees it.
 
 No ROS/KDL dependency: this module is only used to relate a candidate
 Cartesian velocity at the wrist to the corresponding human joint
