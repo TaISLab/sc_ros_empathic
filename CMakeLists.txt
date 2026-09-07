@@ -166,6 +166,7 @@ catkin_install_python(PROGRAMS
    scripts/shared_control_node.py
    scripts/baseline_aan_node.py
    scripts/rviz_visualization_node.py
+   scripts/joint_range_probe.py
    DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
  )
 

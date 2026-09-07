@@ -282,6 +282,18 @@ a `joint_limits_rad` block that isn't all four joints with `max > min`,
 pipeline tracks the right arm only). Omit `subject:=` to run from plain
 params (back-compat).
 
+To fill `joint_limits_rad` from the real range the volunteer covers
+(instead of the study defaults), run
+
+```bash
+rosrun sc_ros_empathic joint_range_probe.py _margin_deg:=5
+```
+
+with the visuo-tactile pipeline up: it tracks the per-joint min/max on
+`/right_arm/joint_states` (applying the same `q4 <- pi - right_arm_q4`
+conversion) and, on Ctrl-C, prints a ready-to-paste `joint_limits_rad:`
+block. Do a task run or a full range-of-motion sweep first.
+
 Everything about the *experiment* is homogeneous across volunteers and
 stays in `config/shared_control.yaml`: gains, factor weights, the
 joint-margin threshold `tau` (`proximity_threshold`), path geometry,
