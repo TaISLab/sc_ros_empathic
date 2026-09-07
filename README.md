@@ -229,8 +229,13 @@ is `[m1..m4, min]` with `m_i = 1 - |rho_i|`.
 rqt_plot /shared_control_node/diag/joint_margins/data[0]:data[1]:data[2]:data[3]:data[4] /shared_control_node/diag/factors_h/data[2]
 ```
 
-When a joint's margin drops toward 0, `factors_h/data[2]`
-(`joint_safety`) must drop toward 0 too (it is `exp(-Cs * penalty)`).
+`joint_safety` (`factors_*[2]`) is `exp(-Cs * penalty)`. `penalty` has
+a static term (grows once a joint's margin drops below
+`proximity_threshold`) and a dynamic term (grows when the candidate
+command drives a joint further toward that limit) -- **both gated by
+proximity**, so a joint that is comfortably mid-range never lowers
+`joint_safety`, however fast the command moves it. It only drops as a
+joint enters the outer `proximity_threshold` band of its range.
 `~diag/joint_limits` is `[q1min,q1max,...,q4min,q4max]` (latched).
 
 **Angle convention.** `joint_limits` (and the DH arm model) use

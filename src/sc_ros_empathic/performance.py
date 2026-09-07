@@ -97,16 +97,24 @@ def joint_safety_factor(q_human, v_candidate, l1, l2,
           candidate command (an artificial-potential-style term).
       (b) DYNAMIC closing-rate term: grows when the candidate command,
           mapped to joint velocities via the arm Jacobian, actively
-          drives a joint further towards the limit it is closest to.
+          drives a joint further towards the limit it is closest to --
+          BUT only once that joint is inside the proximity band. A joint
+          sitting comfortably mid-range is not a joint-limit-safety
+          concern however briskly the command moves it, so both terms
+          are gated by the same `prox_w` (without this gate the dynamic
+          term fires on any motion, anywhere in the range, and near a
+          Jacobian singularity it drives eta_k3 to 0 far from any limit).
 
     For every joint i:
       rho_i    = normalized position in [-1, 1] (0 = mid-range)
       margin_i = 1 - |rho_i|                      (shrinks near a limit)
+      prox_w_i = clip((proximity_threshold - margin_i)/proximity_threshold, 0, 1)
       qdot_i   = joint velocity induced by v_candidate (via arm Jacobian)
       closing_rate_i = qdot_i if moving towards the limit else 0
 
-    penalty = static_weight  * sum_i( max(0, proximity_threshold - margin_i) )
-            + dynamic_weight * sum_i( max(0, closing_rate_i) / max(margin_i, margin_floor) )
+    penalty = static_weight  * sum_i( proximity_threshold * prox_w_i )
+            + dynamic_weight * sum_i( prox_w_i * max(0, closing_rate_i)
+                                      / max(margin_i, margin_floor) )
     eta_k3  = exp(-Cs * penalty)
     """
     if joint_limits is None:
@@ -121,15 +129,20 @@ def joint_safety_factor(q_human, v_candidate, l1, l2,
         q_mid = 0.5 * (q_max + q_min)
         q_half_range = 0.5 * (q_max - q_min)
         rho = (q_human[i] - q_mid) / q_half_range
-        margin = max(1.0 - abs(rho), margin_floor)
+        margin = 1.0 - abs(rho)
 
-        static_penalty += max(0.0, proximity_threshold - margin)
+        # 0 while the joint is within (1 - tau) of mid-range, ramping to
+        # 1 at the limit. Gates BOTH terms.
+        prox_w = min(max((proximity_threshold - margin) / proximity_threshold,
+                         0.0), 1.0)
+        static_penalty += proximity_threshold * prox_w
 
         # Positive when qdot moves the joint further in the direction
         # it is already displaced from the mid-range (i.e. towards
         # whichever limit it is closest to).
         closing_rate = qdot[i] * np.sign(rho) if rho != 0 else 0.0
-        dynamic_penalty += max(closing_rate, 0.0) / margin
+        dynamic_penalty += (prox_w * max(closing_rate, 0.0)
+                            / max(margin, margin_floor))
 
     penalty = static_weight * static_penalty + dynamic_weight * dynamic_penalty
     return float(np.exp(-Cs * penalty))
