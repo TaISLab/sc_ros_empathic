@@ -103,12 +103,17 @@ proximity_threshold: 0.3
 # the visuo-tactile pipeline, not the volunteer. Affects the limits AND
 # the arm Jacobian. Calibrate from two known postures a,b (model angles
 # qa,qb): gain=(qb-qa)/(q_pipe_b-q_pipe_a); offset=q_pipe_a-qa/gain.
-# Defaults leave q untouched. This is only for RESIDUAL fixups -- the
-# known pipeline conventions are already handled in shared_control_node
-# (q4 <- pi - right_arm_q4: the pipeline sends the elbow interior angle).
-# Example, a shoulder joint off by pi/2 (pipeline reads q3 ~ pi/2 at the
-# model's neutral):
-#     human_joint_offsets: [0.0, 0.0, 1.5708, 0.0]
+# Defaults would leave q untouched. q4 is already handled in
+# shared_control_node (q4 <- pi - right_arm_q4). q3: the DH model's
+# q3 = 0 is neutral shoulder int/ext rotation (forearm in the sagittal
+# plane), but the pipeline reads q3 ~ +0.87 rad (~50 deg) there -- from
+# the ROM sweep [-36, +136] deg, midpoint ~+50. So subtract it:
+human_joint_offsets: [0.0, 0.0, 0.875, 0.0]
+human_joint_gains:   [1.0, 1.0, 1.0,   1.0]
+# TODO refine offset[2] from a direct reading: hold the arm at neutral
+# rotation (forearm forward, thumb up, elbow ~90 deg) and
+#   rostopic echo -n1 /right_arm/joint_states/position   # 4th value = right_arm_q3
+# put that value (rad) in offset[2].
 
 # --- Human-arm segment lengths ----------------------------------
 # The visuo-tactile pipeline is expected to publish time-varying

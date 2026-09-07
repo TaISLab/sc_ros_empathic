@@ -240,10 +240,14 @@ joints. The visuo-tactile pipeline reports the elbow as an **interior
 angle** (`pi` rad extended, decreasing with flexion);
 `shared_control_node` converts it (`q4 <- pi - right_arm_q4`) at the
 one entry point, so the control law, the arm Jacobian and every plot
-agree. If a shoulder joint's zero/sign still differs, `joint_safety`
-is scored against the wrong limits (symptom: a joint pinned near
-`rho = +-1` all trial, `joint_safety` stuck near 0, or efficiency
-*rising* as a joint nears a limit). Fix with the affine calibration in
+agree. **q3** (shoulder int/ext rotation): the DH model's `q3 = 0` is
+neutral rotation (forearm in the sagittal plane), but the pipeline
+reads `~+0.87 rad` there, so `config/shared_control.yaml` ships
+`human_joint_offsets: [0, 0, 0.875, 0]` to subtract it. If another
+shoulder joint's zero/sign still differs, `joint_safety` is scored
+against the wrong limits (symptom: a joint pinned near `rho = +-1` all
+trial, `joint_safety` stuck near 0, or efficiency *rising* as a joint
+nears a limit). Fix with the affine calibration in
 `config/shared_control.yaml`:
 
 ```
