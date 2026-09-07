@@ -40,7 +40,7 @@ function plot_joint_angles_offline(csvfile, window, limits_deg, pred_dt)
 
     DEFAULT_LIMITS = [-60 180; 0 180; -90 90; 0 145];   % deg
     if nargin < 2, window = []; end
-    TAU = 0.3;                        % proximity_threshold (config default)
+    TAU = sidecar_num(csvfile, 'proximity_threshold', 0.3);  % safety margin
     JC = [ 31 119 180; 214 39 40; 44 160 44; 148 103 189] / 255;
     JN = {'q1 shoulder flex/ext','q2 shoulder abd/add', ...
           'q3 shoulder int/ext rot','q4 elbow (0=extended)'};
@@ -117,8 +117,8 @@ function plot_joint_angles_offline(csvfile, window, limits_deg, pred_dt)
              'FaceAlpha',0.06, 'EdgeColor','none', 'HandleVisibility','off');
         plot(ax(i), xr, [lo lo], '--', 'Color',JC(i,:), 'LineWidth',1);
         plot(ax(i), xr, [hi hi], '--', 'Color',JC(i,:), 'LineWidth',1);
-        plot(ax(i), xr, [1 1]*pth(1), ':', 'Color',[.85 .55 0], 'LineWidth',1);
-        plot(ax(i), xr, [1 1]*pth(2), ':', 'Color',[.85 .55 0], 'LineWidth',1);
+        plot(ax(i), xr, [1 1]*pth(1), ':', 'Color',[.85 .54 0], 'LineWidth',1.2);
+        plot(ax(i), xr, [1 1]*pth(2), ':', 'Color',[.85 .54 0], 'LineWidth',1.2);
         for kk = 1:3
             plot(ax(i), tf, qpred{kk}(:,i), STY{kk}, 'Color',JC(i,:), ...
                  'LineWidth',1.0);
@@ -167,6 +167,8 @@ function plot_joint_angles_offline(csvfile, window, limits_deg, pred_dt)
     if nargin >= 4 && ~isempty(pred_dt), dtl_src = 'override'; else, dtl_src = 'dt_lookahead'; end
     fprintf('\n%s\n', csvfile);
     fprintf('  joint limits: %s\n', limits_src);
+    fprintf('  safety margin (dotted): rho = +/-%.2f  (proximity_threshold %.2g)\n', ...
+            1 - TAU, TAU);
     fprintf('  prediction horizon: %.3g s (%s)\n', dtl, dtl_src);
     fprintf('  window %.1f-%.1f s  (%.1f s, ~%d laps)\n', ...
             xr(1), xr(2), xr(2)-xr(1), wraps);
@@ -225,6 +227,22 @@ end
 
 function v = getfield_default(s, f, d)
     if isfield(s, f), v = s.(f); else, v = d; end
+end
+
+function v = sidecar_num(csvfile, key, dflt)
+% one numeric value from "<csv>.params.json" -> factors.<key>, else dflt
+    v = dflt;
+    [d, n] = fileparts(csvfile);
+    side = fullfile(d, [n '.params.json']);
+    if exist(side, 'file') ~= 2, return; end
+    try
+        s = jsondecode(fileread(side));
+        if isfield(s, 'factors') && isfield(s.factors, key) ...
+                && ~isempty(s.factors.(key))
+            v = double(s.factors.(key));
+        end
+    catch
+    end
 end
 
 function draw_lap_lines(ax, edges, nums, label)

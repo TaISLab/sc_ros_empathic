@@ -161,9 +161,11 @@ extrapolated `dt_lookahead` ahead along the joint velocity the `v_h` /
 `v_r` / blend-`v_hat_s` candidate commands induce
 (`~diag/joint_deg_future_{h,r,s}`, the blend taken before `eta_s`
 scales the output) -- what `joint_safety`'s dynamic term scores for
-each candidate; the joint's `[min, max]` range is the shaded band. A
-future trace heading into the band is what pulls that candidate's
-`joint_safety` down. The last subplot carries **only the
+each candidate; the joint's `[min, max]` range is the shaded band
+(dashed edges) and the amber dotted lines are the safety margins at
+`rho = +-(1 - proximity_threshold)` -- inside them `joint_safety`
+starts to penalise. A future trace heading past a dotted line is what
+pulls that candidate's `joint_safety` down. The last subplot carries **only the
 joint-limit-safety factor** for each candidate -- `js_h` / `js_r` /
 `js_s` = `factors_{h,r,s}[2]` (`joint_safety`, in `(0, 1]`), not the
 full weighted `eta`. `show_future:=false` / `show_joint_safety:=false`

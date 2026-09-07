@@ -19,7 +19,9 @@ Per joint subplot, in that joint's colour:
 Each future trace is q_h + qdot_k * dt_lookahead: qdot_k is what
 joint_safety's dynamic term scores for candidate k, over the
 controller's own lookahead horizon. The joint's [min, max] range is a
-shaded band in the same subplot.
+shaded band (dashed edges); the amber dotted lines are the safety
+margins at rho = +-(1 - proximity_threshold) -- inside them
+joint_safety starts to penalise.
 
 Efficiency subplot: ONLY the joint-limit-safety factor (factors_*[2],
 "joint_safety", in (0, 1]) for each candidate -- js_h / js_r / js_s
@@ -46,6 +48,7 @@ JOINT_LABELS = ('q1 shoulder flex/ext', 'q2 shoulder abd/add',
                 'q3 shoulder int/ext rot', 'q4 elbow (0=extended)')
 # joint_safety factor per candidate -> colour
 JS_COLOURS = {'h': '#1b9e77', 'r': '#7570b3', 's': '#d95f02'}
+TAU_COLOUR = '#d98a00'   # proximity-threshold (safety-margin) lines
 # candidate command -> line style (measured q_h is 'solid')
 STYLE = {'meas': '-', 'h': '--', 'r': ':', 's': '-.'}
 STYLE_LABEL = {'meas': 'measured', 'h': 'v_h projection',
@@ -68,6 +71,11 @@ class JointAnglePlot(object):
         self.redraw_hz = float(rospy.get_param('~redraw_hz', 15.0))
         self.show_future = bool(rospy.get_param('~show_future', True))
         self.show_js = bool(rospy.get_param('~show_joint_safety', True))
+        # safety-margin lines at rho = +-(1-tau): where joint_safety
+        # starts penalising. Pick up the node's value if it is up.
+        self.tau = float(rospy.get_param(
+            '~proximity_threshold',
+            rospy.get_param('/shared_control_node/proximity_threshold', 0.3)))
 
         base = '/shared_control_node'
         deg_topic = rospy.get_param('~joint_deg_topic', base + '/diag/joint_deg')
@@ -218,6 +226,13 @@ class JointAnglePlot(object):
                 self._band_artists.append(
                     ax.axhline(y, color=c, ls='--', lw=1.0, alpha=0.6,
                                zorder=1))
+            # safety margins: rho = +-(1 - tau)
+            mid, half = 0.5 * (lo + hi), 0.5 * (hi - lo)
+            for y in (mid - (1.0 - self.tau) * half,
+                      mid + (1.0 - self.tau) * half):
+                self._band_artists.append(
+                    ax.axhline(y, color=TAU_COLOUR, ls=':', lw=1.1,
+                               alpha=0.8, zorder=1))
 
     @staticmethod
     def _set(line, t, v):
