@@ -27,11 +27,14 @@ function plot_joint_safety_surface(limits_deg, opts)
 %   qdot_i is the joint velocity the candidate Cartesian command induces
 %   through the human-arm Jacobian; here it is swept directly.
 %
-%   penalty = static_weight  * tau * prox_w
-%           + dynamic_weight * prox_w * max(0, qdot_i*sign(rho_i))
-%                              / max(margin_i, margin_floor)
+%   closing_rate = qdot_i*sign(rho_i)   (>0 approach, <0 retreat)
+%   penalty = max(0,  static_weight  * tau * prox_w
+%                   + dynamic_weight * prox_w * closing_rate
+%                                      / max(margin_i, margin_floor) )
 %   with margin_i = 1 - |rho_i|,  prox_w = clip((tau - margin_i)/tau, 0, 1),
 %   rho_i = (q_i - q_mid)/q_half,  eta_k3 = exp(-Cs * penalty).
+%   The dynamic term is SIGNED: a retreat earns a relief credit that
+%   offsets the static term (per joint, the sum is floored at 0).
 
     if nargin < 1 || isempty(limits_deg), limits_deg = [-90 90]; end
     d.Cs = 12; d.proximity_threshold = 0.3; d.margin_floor = 0.05;
@@ -55,10 +58,10 @@ function plot_joint_safety_surface(limits_deg, opts)
     RHO    = (Q - qmid) ./ qhalf;
     MARGIN = 1 - abs(RHO);
     PROXW  = min(max((tau - MARGIN) ./ tau, 0), 1);
-    CLOSE  = QD .* sign(RHO);                          % closing rate
+    CLOSE  = QD .* sign(RHO);                          % >0 approach, <0 retreat
     STAT   = tau .* PROXW;
-    DYN    = PROXW .* max(CLOSE, 0) ./ max(MARGIN, opts.margin_floor);
-    PEN    = opts.static_weight .* STAT + opts.dynamic_weight .* DYN;
+    DYN    = PROXW .* CLOSE ./ max(MARGIN, opts.margin_floor);   % signed
+    PEN    = max(0, opts.static_weight .* STAT + opts.dynamic_weight .* DYN);
     ETA    = exp(-opts.Cs .* PEN);
 
     qc = qmid + (1 - tau) * qhalf * [-1 1];            % caution q (rho = +-(1-tau))

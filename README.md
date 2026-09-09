@@ -241,14 +241,18 @@ is `[m1..m4, min]` with `m_i = 1 - |rho_i|`.
 rqt_plot /shared_control_node/diag/joint_margins/data[0]:data[1]:data[2]:data[3]:data[4] /shared_control_node/diag/factors_h/data[2]
 ```
 
-`joint_safety` (`factors_*[2]`) is `exp(-Cs * penalty)`. `penalty` has
-a static term (grows once a joint's margin drops below
-`proximity_threshold`) and a dynamic term (grows when the candidate
-command drives a joint further toward that limit) -- **both gated by
-proximity**, so a joint that is comfortably mid-range never lowers
-`joint_safety`, however fast the command moves it. It only drops as a
-joint enters the outer `proximity_threshold` band of its range.
-`~diag/joint_limits` is `[q1min,q1max,...,q4min,q4max]` (latched).
+`joint_safety` (`factors_*[2]`) is `exp(-Cs * penalty)`, `penalty`
+summed over joints and each term **gated by proximity** (`prox_w = 0`
+while the joint is within `1 - proximity_threshold` of mid-range), so a
+comfortably mid-range joint never lowers it however fast the command
+moves it. Inside the band, per joint: a static term (position only,
+artificial-potential) plus a **signed** dynamic term
+`prox_w * closing_rate / margin = prox_w / (time-to-limit)` -- it
+*penalises* an approach (scaling with both approach speed and
+closeness) and *credits* a retreat (offsetting the static term, the
+per-joint sum floored at 0). So moving away from a limit is not
+attenuated. `~diag/joint_limits` is `[q1min,q1max,...,q4min,q4max]`
+(latched). `matlab/plot_joint_safety_surface.m` plots the shape.
 
 **Angle convention.** `joint_limits` (and the DH arm model) use
 `q4 = 0` at the extended arm, positive as the elbow flexes (to

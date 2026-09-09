@@ -95,26 +95,31 @@ def joint_safety_factor(q_human, v_candidate, l1, l2,
       (a) STATIC proximity term: grows as any joint's margin to its
           limit shrinks below `proximity_threshold`, regardless of the
           candidate command (an artificial-potential-style term).
-      (b) DYNAMIC closing-rate term: grows when the candidate command,
-          mapped to joint velocities via the arm Jacobian, actively
-          drives a joint further towards the limit it is closest to --
-          BUT only once that joint is inside the proximity band. A joint
-          sitting comfortably mid-range is not a joint-limit-safety
-          concern however briskly the command moves it, so both terms
-          are gated by the same `prox_w` (without this gate the dynamic
-          term fires on any motion, anywhere in the range, and near a
-          Jacobian singularity it drives eta_k3 to 0 far from any limit).
+      (b) DYNAMIC rate term: SIGNED. It grows when the candidate command,
+          mapped to joint velocities via the arm Jacobian, drives a
+          joint towards the limit it is closest to, and it goes NEGATIVE
+          -- a "relief credit" that offsets (a) -- when the command
+          moves the joint away from that limit. It scales as
+          closing_rate / margin == 1 / (time-to-limit), so it depends on
+          BOTH the approach speed and how close the joint already is.
+
+    Both terms are gated by the same `prox_w`, which is 0 while the
+    joint sits within (1 - tau) of mid-range: a joint comfortably
+    mid-range is never a joint-limit-safety concern however briskly the
+    command moves it. Per joint the two terms are summed and floored at
+    0 (one joint retreating cannot license another approaching).
 
     For every joint i:
       rho_i    = normalized position in [-1, 1] (0 = mid-range)
       margin_i = 1 - |rho_i|                      (shrinks near a limit)
       prox_w_i = clip((proximity_threshold - margin_i)/proximity_threshold, 0, 1)
       qdot_i   = joint velocity induced by v_candidate (via arm Jacobian)
-      closing_rate_i = qdot_i if moving towards the limit else 0
+      closing_rate_i = qdot_i * sign(rho_i)       (>0 approach, <0 retreat)
 
-    penalty = static_weight  * sum_i( proximity_threshold * prox_w_i )
-            + dynamic_weight * sum_i( prox_w_i * max(0, closing_rate_i)
-                                      / max(margin_i, margin_floor) )
+    penalty = sum_i max(0,
+                static_weight  * proximity_threshold * prox_w_i
+              + dynamic_weight * prox_w_i * closing_rate_i
+                                 / max(margin_i, margin_floor) )
     eta_k3  = exp(-Cs * penalty)
     """
     if joint_limits is None:
@@ -123,8 +128,7 @@ def joint_safety_factor(q_human, v_candidate, l1, l2,
     q_human = np.asarray(q_human, dtype=float)
     qdot = cartesian_to_human_joint_velocity(q_human, l1, l2, v_candidate, J=J_arm)
 
-    static_penalty = 0.0
-    dynamic_penalty = 0.0
+    penalty = 0.0
     for i, (q_min, q_max) in enumerate(joint_limits):
         q_mid = 0.5 * (q_max + q_min)
         q_half_range = 0.5 * (q_max - q_min)
@@ -135,16 +139,16 @@ def joint_safety_factor(q_human, v_candidate, l1, l2,
         # 1 at the limit. Gates BOTH terms.
         prox_w = min(max((proximity_threshold - margin) / proximity_threshold,
                          0.0), 1.0)
-        static_penalty += proximity_threshold * prox_w
 
-        # Positive when qdot moves the joint further in the direction
-        # it is already displaced from the mid-range (i.e. towards
-        # whichever limit it is closest to).
+        # signed rate towards the nearer limit: >0 approaching, <0
+        # retreating (which earns a relief credit against the static term)
         closing_rate = qdot[i] * np.sign(rho) if rho != 0 else 0.0
-        dynamic_penalty += (prox_w * max(closing_rate, 0.0)
-                            / max(margin, margin_floor))
 
-    penalty = static_weight * static_penalty + dynamic_weight * dynamic_penalty
+        static_i = proximity_threshold * prox_w
+        dynamic_i = prox_w * closing_rate / max(margin, margin_floor)
+        penalty += max(0.0, static_weight * static_i
+                       + dynamic_weight * dynamic_i)
+
     return float(np.exp(-Cs * penalty))
 
 
