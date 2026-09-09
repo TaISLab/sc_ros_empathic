@@ -198,6 +198,15 @@ its own): the reference circle and the robot EE path in the circle
 plane, with `v_h` / `v_r` / `v_h+v_r` arrows every ~1 s and the
 eta-weighted arrows (`eta_h v_h`, `eta_r v_r`, `v_s`) overlaid.
 
+`matlab/plot_joint_safety_surface.m` draws `eta_k3` (the
+joint-limit-safety factor) as a height surface over
+`(joint angle, joint velocity)`, with the limit and caution
+(`proximity_threshold`) values marked -- a method figure, computed
+straight from `performance.joint_safety_factor`'s formula for one joint
+in isolation. `plot_joint_safety_surface([0 145])` for the elbow;
+`opts` overrides `Cs`, `proximity_threshold`, `qdot_max`, `style`
+(`'surf'` | `'contourf'`).
+
 The CSV rows carry no config beyond `condition`, so the node writes a
 **`<csv>.params.json` sidecar** next to it (geometry, follower gains,
 factor weights / `Cs` / `proximity_threshold`, `planar_task`,
