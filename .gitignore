@@ -49,3 +49,9 @@ qtcreator-*
 
 # Catkin custom files
 CATKIN_IGNORE
+
+# Zenodo dataset staging: keep README/MANIFEST tracked, not the trial data itself
+dataset/S*/*
+!dataset/S*/.gitkeep
+dataset/bags/*
+!dataset/bags/.gitkeep
