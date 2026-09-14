@@ -20,21 +20,38 @@ formula and what changed.
 
 ## Subjects
 
-| id | date | sex | age | height (m) | mass (kg) | l1 (m) | l2 (m) | notes |
+| id | date | sex | age | height (m) | mass (kg) | l1 (m) | l2 (m) | source |
 |---|---|---|---|---|---|---|---|---|
-| S01 | | | | | | | | |
-| S02 | | | | | | | | |
-| S03 | | | | | | | | |
+| S01 | *n/r* | m | 60 | 1.82 | 85 | 0.29 | 0.27 | tape |
+| S02 | *n/r* | m | 46 | 1.75 | 108 | 0.33 | 0.29 | tape |
+| S03 | *n/r* | f | 54 | 1.75 | 75 | 0.34 | 0.30 | tape |
 
-Fill in from each `config/subjects/SXX.yaml` on the lab machine (only
-the anonymised id is used here — no names). `l1`/`l2` are the upper-arm
-/ forearm segment lengths used to seed the arm model (they also vary
-slightly per trial; see the `l1,l2` CSV columns and the sidecar).
-Per-subject pre-registered joint ranges (`joint_limits_rad`), if
-calibrated with `joint_range_probe.py`, are in each `SXX.yaml` — copy
-them into a `subjects/SXX.yaml` folder alongside the trials if you want
-them archived here too (optional; they are already embedded in every
-trial's `.params.json` sidecar).
+Only the anonymised id is used here — no names. `date` was left blank
+in the source subject files (*n/r* = not recorded); fill in per-session
+dates if/when reconstructed from the trial filename timestamps. `l1`/
+`l2` (upper-arm / forearm segment length) are the static values used to
+seed the arm model; the live per-cycle value used by the controller
+that trial is in the `l1,l2` CSV columns and may drift slightly from
+this table (visuo-tactile re-estimate vs. tape measurement here).
+
+Pre-registered joint ranges (`joint_limits_rad`, rad), from
+`joint_range_probe.py` ROM sweeps, all four required if the block is
+present at all:
+
+| id | q1 (shoulder flex/ext) | q2 (shoulder abd/add) | q3 (shoulder int/ext rot) | q4 (elbow flex/ext) |
+|---|---|---|---|---|
+| S01 | [-0.566, 1.563] | [-0.081, 1.408] | [-1.57, 1.57] (study default) | [0.001, 2.770] |
+| S02 | [-0.310, 1.829] | [-0.204, 1.389] | [-1.577, 1.800] | [0.199, 2.798] |
+| S03 | [-1.018, 1.496] | [-0.610, 1.471] | [-1.57, 1.57] (study default) | [0.156, 2.512] |
+
+S01's and S03's q3 ranges are the study default (commented out /
+unset in the source subject file), not a per-participant calibration —
+the same `[-1.57, 1.57]` used when the block is omitted entirely; only
+S02 has a directly calibrated q3. These are the ranges `rho1..rho4`
+are normalised against in every trial where `subject:=SXX` was passed;
+they are also embedded per-trial in each `.params.json` sidecar, which
+is the authoritative source if this table and a given trial ever
+disagree (e.g. after a later re-calibration).
 
 ## Experimental conditions
 
