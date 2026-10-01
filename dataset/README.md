@@ -7,8 +7,8 @@ a controller blends the human's intent with an autonomous path follower,
 weighted by up to four performance factors (smoothness, directness,
 human joint-limit safety, robot manipulability). Three volunteers
 (S01–S03), each run through conditions A–E in both a nominal and a
-"stressed" placement (condition F collected but not yet included —
-see Curation).
+"stressed" placement, plus condition F (nominal only, a different
+controller — see Curation).
 
 Software: <https://github.com/TaISLab/sc_ros_empathic> (or the lab's
 private remote — fill in the actual URL before publishing), commit
@@ -68,7 +68,7 @@ path-following command participates at all.
 | `C_jointsafety_m3` | smoothness, directness, joint_safety | ablation: baseline + only the joint-limit-safety factor | nominal + stressed |
 | `D_manip_m3` | smoothness, directness, manipulability | ablation: baseline + only the manipulability factor | nominal + stressed |
 | `E_extended_m4` | all four | **the proposed controller**, compared against B | nominal + stressed |
-| `F_impedance_aan` | *(separate controller)* | impedance-control assist-as-needed baseline of Zhang et al. [9] | **not in this deposit — see Curation** |
+| `F_impedance_aan` | *(separate controller)* | impedance-control assist-as-needed baseline of Zhang et al. [9] | nominal only, **no sidecar — see Curation** |
 
 Each trial is `trial_laps:=7`, the first discarded as training
 (`lap == 0` in the CSV) — 6 analysed laps per trial.
@@ -95,7 +95,11 @@ One CSV + one JSON sidecar per trial, named
 it from the sidecar's `path.center`/`path.radius` (nominal =
 `[0.45,0,0.45]`/`0.05`, anything else = stressed; see Curation below
 for the one-file-per-subject-condition-placement selection already
-applied to this deposit). Optional rosbags (full topic recording, see
+applied to this deposit). The exception is `F_impedance_aan`: it has
+**no sidecar at all** (see Curation) and is nominal placement only, by
+protocol, with no per-trial geometry record — take the nominal
+`path_center`/`path_radius` launch-arg defaults from the software
+README if you need them. Optional rosbags (full topic recording, see
 below) are large and kept separately under `bags/` as one
 `.bag.zip`/session (not one per trial — recording spans the whole
 session, sliced offline by lap).
@@ -170,17 +174,21 @@ trial per `(subject, condition, placement)` cell**, selected as:
    `S02_A_standalone` nominal, would otherwise have kept a 12 s run
    with 86 % of samples outside the subject's calibrated joint range).
 
-Result: 30 trials (10 per subject: A/B/C/D/E × nominal/stressed), all
-on commit `1d0c4f9`, all 7 laps. `MANIFEST.csv` records which file was
-kept for each cell and why (`collected` / `notes` columns); the
-superseded repeats and pre-fix files are not included in this deposit.
+Result: 33 trials (11 per subject: A/B/C/D/E × nominal/stressed, plus
+F nominal), all on commit `1d0c4f9` where a sidecar exists, all 7
+laps. `MANIFEST.csv` records which file was kept for each cell and why
+(`collected` / `notes` columns); the superseded repeats and pre-fix
+files are not included in this deposit.
 
-**Condition F is not in this deposit.** `baseline_aan_node.py` never
-writes a `.params.json` sidecar (by design — it logs a reduced topic
-set, see the software README), so every F trial was dropped by rule 1
-above. Decide before publishing: either add sidecar support to
-`baseline_aan_node.py` and re-export, or document F as a planned
-addition and publish A–E now.
+**Condition F has no sidecar, included anyway.**
+`baseline_aan_node.py` never writes a `.params.json` (by design — it
+logs a reduced topic set and does not use the human-arm/joint-safety
+pipeline at all, see the software README), so rule 1 doesn't apply to
+F the way it does to A–E: the pre/post `1d0c4f9` distinction is
+irrelevant for F (that fix only touched the human joint-angle
+model/`joint_safety`, which F never computes). F was curated the same
+way as the rest otherwise — latest trial with ≥1 completed lap per
+subject — with no sidecar requirement.
 
 Two stray desktop screenshots (`Captura de pantalla ....png`,
 `gripper_grasping.png`) were present in the raw export and are not
