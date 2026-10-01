@@ -1,28 +1,34 @@
 subject,condition,placement,required,laps_expected,filename,collected,notes
-S01,A_standalone,nominal,yes,4,,no,
-S01,A_standalone,stressed,yes,4,,no,
-S01,B_baseline_m2,nominal,yes,4,,no,
-S01,B_baseline_m2,stressed,yes,4,,no,
-S01,C_jointsafety_m3,stressed,optional,4,,no,
-S01,D_manip_m3,stressed,optional,4,,no,
-S01,E_extended_m4,nominal,yes,4,,no,
-S01,E_extended_m4,stressed,yes,4,,no,
-S01,F_impedance_aan,nominal,yes,4,,no,
-S02,A_standalone,nominal,yes,4,,no,
-S02,A_standalone,stressed,yes,4,,no,
-S02,B_baseline_m2,nominal,yes,4,,no,
-S02,B_baseline_m2,stressed,yes,4,,no,
-S02,C_jointsafety_m3,stressed,optional,4,,no,
-S02,D_manip_m3,stressed,optional,4,,no,
-S02,E_extended_m4,nominal,yes,4,,no,
-S02,E_extended_m4,stressed,yes,4,,no,
-S02,F_impedance_aan,nominal,yes,4,,no,
-S03,A_standalone,nominal,yes,4,,no,
-S03,A_standalone,stressed,yes,4,,no,
-S03,B_baseline_m2,nominal,yes,4,,no,
-S03,B_baseline_m2,stressed,yes,4,,no,
-S03,C_jointsafety_m3,stressed,optional,4,,no,
-S03,D_manip_m3,stressed,optional,4,,no,
-S03,E_extended_m4,nominal,yes,4,,no,
-S03,E_extended_m4,stressed,yes,4,,no,
-S03,F_impedance_aan,nominal,yes,4,,no,
+S01,A_standalone,nominal,yes,7,S01_A_standalone_2026-09-11_12-46-57.csv,yes,curated: latest of 9 repeats on commit 1d0c4f9
+S01,A_standalone,stressed,yes,7,S01_A_standalone_2026-09-11_12-33-43.csv,yes,curated: latest of 2 repeats on commit 1d0c4f9
+S01,B_baseline_m2,nominal,yes,7,S01_B_baseline_m2_2026-09-11_12-48-02.csv,yes,curated: latest of 5 repeats on commit 1d0c4f9
+S01,B_baseline_m2,stressed,yes,7,S01_B_baseline_m2_2026-09-11_12-35-21.csv,yes,curated: latest of 2 repeats on commit 1d0c4f9
+S01,C_jointsafety_m3,nominal,optional,7,S01_C_jointsafety_m3_2026-09-11_12-49-14.csv,yes,curated: only 1d0c4f9 trial (12 pre-fix repeats discarded, no sidecar)
+S01,C_jointsafety_m3,stressed,optional,7,S01_C_jointsafety_m3_2026-09-11_12-38-23.csv,yes,curated: latest of 2 repeats on commit 1d0c4f9
+S01,D_manip_m3,nominal,optional,7,S01_D_manip_m3_2026-09-11_12-50-10.csv,yes,curated: only 1d0c4f9 trial
+S01,D_manip_m3,stressed,optional,7,S01_D_manip_m3_2026-09-11_12-39-46.csv,yes,curated: only 1d0c4f9 trial
+S01,E_extended_m4,nominal,yes,7,S01_E_extended_m4_2026-09-11_12-51-17.csv,yes,curated: latest of 4 repeats on commit 1d0c4f9
+S01,E_extended_m4,stressed,yes,7,S01_E_extended_m4_2026-09-11_12-41-11.csv,yes,curated: latest of 2 repeats on commit 1d0c4f9
+S01,F_impedance_aan,nominal,yes,7,,no,EXCLUDED: baseline_aan_node never writes a .params.json sidecar -- all 3 S01 F trials dropped by the no-sidecar rule. Needs a decision (see note below).
+S02,A_standalone,nominal,yes,7,S02_A_standalone_2026-09-11_10-41-09.csv,yes,curated: latest *completed* (7-lap) trial -- the chronologically-last one (11-11-00) was a 12s/0-lap aborted run with 86% of samples outside the calibrated ROM, skipped
+S02,A_standalone,stressed,yes,7,S02_A_standalone_2026-09-11_12-23-02.csv,yes,curated: only repeat
+S02,B_baseline_m2,nominal,yes,7,S02_B_baseline_m2_2026-09-11_10-42-03.csv,yes,curated: only repeat
+S02,B_baseline_m2,stressed,yes,7,S02_B_baseline_m2_2026-09-11_12-24-30.csv,yes,curated: only repeat
+S02,C_jointsafety_m3,nominal,optional,7,S02_C_jointsafety_m3_2026-09-11_10-42-57.csv,yes,curated: only repeat
+S02,C_jointsafety_m3,stressed,optional,7,S02_C_jointsafety_m3_2026-09-11_12-25-57.csv,yes,curated: only repeat
+S02,D_manip_m3,nominal,optional,7,S02_D_manip_m3_2026-09-11_10-44-17.csv,yes,curated: only repeat
+S02,D_manip_m3,stressed,optional,7,S02_D_manip_m3_2026-09-11_12-27-16.csv,yes,curated: only repeat
+S02,E_extended_m4,nominal,yes,7,S02_E_extended_m4_2026-09-11_10-45-27.csv,yes,curated: latest of 6 repeats (3 discarded as pre-final-formula: 2 on commit a61ffdd, pre-signed-dynamic-term)
+S02,E_extended_m4,stressed,yes,7,S02_E_extended_m4_2026-09-11_12-28-46.csv,yes,curated: latest of 3 repeats
+S02,F_impedance_aan,nominal,yes,7,,no,EXCLUDED: no sidecar ever written for F -- see note below
+S03,A_standalone,nominal,yes,7,S03_A_standalone_2026-09-11_11-12-18.csv,yes,curated: only repeat
+S03,A_standalone,stressed,yes,7,S03_A_standalone_2026-09-11_12-02-54.csv,yes,curated: latest of 2 repeats
+S03,B_baseline_m2,nominal,yes,7,S03_B_baseline_m2_2026-09-11_11-14-18.csv,yes,curated: only repeat
+S03,B_baseline_m2,stressed,yes,7,S03_B_baseline_m2_2026-09-11_12-05-08.csv,yes,curated: only repeat
+S03,C_jointsafety_m3,nominal,optional,7,S03_C_jointsafety_m3_2026-09-11_11-16-46.csv,yes,curated: latest of 2 repeats
+S03,C_jointsafety_m3,stressed,optional,7,S03_C_jointsafety_m3_2026-09-11_12-15-42.csv,yes,curated: latest of 6 repeats
+S03,D_manip_m3,nominal,optional,7,S03_D_manip_m3_2026-09-11_11-17-57.csv,yes,curated: only repeat
+S03,D_manip_m3,stressed,optional,7,S03_D_manip_m3_2026-09-11_12-17-25.csv,yes,curated: only repeat
+S03,E_extended_m4,nominal,yes,7,S03_E_extended_m4_2026-09-11_11-18-50.csv,yes,curated: only repeat
+S03,E_extended_m4,stressed,yes,7,S03_E_extended_m4_2026-09-11_12-19-16.csv,yes,curated: only repeat
+S03,F_impedance_aan,nominal,yes,7,,no,EXCLUDED: no sidecar ever written for F -- see note below
