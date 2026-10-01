@@ -23,13 +23,18 @@
   <arg name="path_radius"    default="0.05"/>
   <arg name="path_normal"    default="[0.0, 0.0, 1.0]"/>
   <arg name="path_direction" default="forward"/>   <!-- forward | reverse -->
+  <arg name="planar_task"    default="false"/>     <!-- true -> project v_h onto the plane _|_ path_normal -->
 
   <!-- impedance-AAN law (PLACEHOLDERS, set from [9]) -->
   <arg name="impedance_stiffness"     default="300.0"/>
   <arg name="impedance_damping"       default="40.0"/>
   <arg name="assist_admittance_gain" default="0.002"/>
   <arg name="deadband_m"             default="0.01"/>
-  <arg name="assist_ramp"            default="1.0"/>
+  <!-- gate = clip(assist_ramp * (|err| - deadband_m), 0, 1); 30 (1/m)
+       saturates ~3.3 cm beyond the dead-band, in scale with the task.
+       The old default (1.0) didn't saturate until |err| exceeded 1 m,
+       so the assist barely ever engaged; see scripts/baseline_aan_node.py. -->
+  <arg name="assist_ramp"            default="30.0"/>
 
   <!-- human admittance + output shaping (match the main node) -->
   <arg name="admittance_mass"    default="[2.0, 2.0, 2.0]"/>
@@ -75,6 +80,7 @@
     <param name="path_radius"    value="$(arg path_radius)"/>
     <rosparam param="path_normal" subst_value="true">$(arg path_normal)</rosparam>
     <param name="path_direction" value="$(arg path_direction)"/>
+    <param name="planar_task"    value="$(arg planar_task)"/>
     <param name="impedance_stiffness"     value="$(arg impedance_stiffness)"/>
     <param name="impedance_damping"       value="$(arg impedance_damping)"/>
     <param name="assist_admittance_gain" value="$(arg assist_admittance_gain)"/>

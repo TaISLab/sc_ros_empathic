@@ -614,16 +614,21 @@ roslaunch sc_ros_empathic baseline_aan.launch subject:=S01 record:=true csv:=tru
 ```
 
 Shared args: `subject`, `trial_label`, `path_center` / `path_radius` /
-`path_normal` / `path_direction`, `admittance_mass` /
+`path_normal` / `path_direction` / `planar_task`, `admittance_mass` /
 `admittance_damping`, `force_deadzone_N`, `force_tare_s`, `v_max`,
 `lpf_alpha`, `rate_hz`, `trial_laps`, `trial_end`, `record` / `bag_dir`,
 `csv` / `csv_dir` / `csv_path`, `rviz` / `show_plane` / `rviz_config`,
 `robot_bringup`, `human_arm_points_topic`, `robot_ip`, `base_link`.
 Impedance-AAN knobs (**placeholders, set from [9]**):
 `impedance_stiffness`, `impedance_damping`, `assist_admittance_gain`,
-`deadband_m`, `assist_ramp`. Not applicable: the four-factor knobs,
-`condition`, `jacobian_source`, `Ka` / `cruise_speed` / `follower_mode`,
-`show_vel_arrows` / `show_eta_text`.
+`deadband_m`, `assist_ramp` (default `30.0`, 1/m -- the gate
+`clip(assist_ramp * (|err| - deadband_m), 0, 1)` saturates ~3.3 cm
+beyond the dead-band; the earlier default of `1.0` didn't saturate
+until `|err| > 1 m`, so the assist almost never actually engaged on
+this task's cm-scale errors -- see `scripts/baseline_aan_node.py`).
+Not applicable: the four-factor knobs, `condition`, `jacobian_source`,
+`Ka` / `cruise_speed` / `follower_mode`, `show_vel_arrows` /
+`show_eta_text`.
 
 ## Troubleshooting
 

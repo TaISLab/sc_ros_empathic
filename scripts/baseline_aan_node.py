@@ -24,7 +24,10 @@ other condition.
         is velocity), blended with the same admittance-derived v_h.
     Set K, D, the dead-band / performance-scaling law and the update
     rule to match [9] and PRE-REGISTER them before recording a real
-    condition-F result.
+    condition-F result. (`assist_ramp` was rescaled 2026-10-01 from an
+    1/m default that didn't saturate the assist gate until >1 m of
+    error -- see the comment at its declaration below -- but it is
+    still a placeholder pending [9], not a validated value.)
 
 Publishes <cmd_topic> and a reduced ~diag/* set (condition, v_h,
 v_r == v_assist, v_s, force, path_progress, trial_done).
@@ -56,6 +59,18 @@ class BaselineAANNode(object):
         pd = str(rospy.get_param('~path_direction', 'forward')).lower()
         self.path_dir = -1 if pd == 'reverse' else 1
         self.path = CirclePath(center=center, radius=radius, normal=normal)
+
+        # Planar task -- same projection as shared_control_node.py: v_h
+        # is projected onto the plane _|_ path_normal, so out-of-plane
+        # force doesn't drag the EE off the circle plane. Default off
+        # (full 3D), matching the main node's default.
+        self.planar_task = bool(rospy.get_param('~planar_task', False))
+        _n = np.asarray(normal, dtype=float)
+        self._plane_n = _n / (np.linalg.norm(_n) or 1.0)
+        if self.planar_task:
+            rospy.loginfo('baseline_aan_node: planar_task -> v_h projected '
+                          'onto the plane _|_ path_normal %s',
+                          self._plane_n.round(3).tolist())
         # follower is only used to get the moving reference x_d and the
         # travel tangent; F's assist comes from its own impedance, not
         # from the follower command.
@@ -74,7 +89,15 @@ class BaselineAANNode(object):
         self.D = float(rospy.get_param('~impedance_damping', 40.0))        # N.s/m
         self.adm_gain = float(rospy.get_param('~assist_admittance_gain', 0.002))
         self.deadband_m = float(rospy.get_param('~deadband_m', 0.01))
-        self.assist_ramp = float(rospy.get_param('~assist_ramp', 1.0))     # 1/m
+        # gate = clip(assist_ramp * (|err| - deadband_m), 0, 1) -- at the
+        # old default (1.0 1/m) the gate didn't reach 1.0 until |err|
+        # exceeded 1 m, so on this ~0.05-0.10 m radius task it stayed
+        # under ~0.2 even at the largest observed tracking errors (see
+        # dataset/README.md Curation notes) -- the AAN assist almost
+        # never actually engaged. 30 (1/m) saturates ~3.3 cm beyond the
+        # dead-band, in scale with the task; still a placeholder pending
+        # validation against [9].
+        self.assist_ramp = float(rospy.get_param('~assist_ramp', 30.0))    # 1/m
 
         # --- output shaping ---------------------------------------------
         self.v_max = float(rospy.get_param('~v_max', 0.08))
@@ -150,6 +173,9 @@ class BaselineAANNode(object):
             # Human command (admittance).
             accel = (self.force.f_filtered - self.B_h * self.v_h) / self.M_h
             self.v_h = self.v_h + accel * self.dt
+            if self.planar_task:
+                self.v_h = self.v_h - np.dot(self.v_h, self._plane_n) \
+                    * self._plane_n
 
             x_d, tangent, _ = self.follower.next_goal(self.x)
             x_dot = (np.zeros(3) if self.x_prev is None
